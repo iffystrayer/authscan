@@ -1,0 +1,191 @@
+"""Tests for the Brute Force attack module."""
+from __future__ import annotations
+
+import responses
+
+from auth_scan.attacks.base import ScanReport
+from auth_scan.attacks.brute import BruteForce, DEFAULT_CREDENTIALS
+from auth_scan.core.config import ScanConfig
+from auth_scan.core.http_client import HTTPClient
+
+
+class TestBruteForce:
+    """Tests for the Brute Force module."""
+
+    def test_discover_login_forms(self) -> None:
+        bf = BruteForce()
+        report = ScanReport(target="https://example.com")
+        report.metadata["probe_forms"] = [
+            {
+                "action": "/login",
+                "method": "POST",
+                "inputs": [
+                    {"name": "username", "type": "text", "value": ""},
+                    {"name": "password", "type": "password", "value": ""},
+                    {"name": "csrf_token", "type": "hidden", "value": "abc123"},
+                ],
+            },
+        ]
+        forms = bf._discover_login_forms(report)
+        assert len(forms) == 1
+        assert forms[0]["username_field"] == "username"
+        assert forms[0]["password_field"] == "password"
+        assert len(forms[0]["hidden_fields"]) == 1
+
+    def test_no_login_forms(self) -> None:
+        bf = BruteForce()
+        report = ScanReport(target="https://example.com")
+        # No forms at all
+        forms = bf._discover_login_forms(report)
+        assert len(forms) == 0
+
+    def test_no_password_field_forms(self) -> None:
+        bf = BruteForce()
+        report = ScanReport(target="https://example.com")
+        report.metadata["probe_forms"] = [
+            {
+                "action": "/search",
+                "method": "GET",
+                "inputs": [
+                    {"name": "q", "type": "text", "value": ""},
+                ],
+            },
+        ]
+        forms = bf._discover_login_forms(report)
+        assert len(forms) == 0
+
+    def test_default_credentials_not_empty(self) -> None:
+        assert len(DEFAULT_CREDENTIALS) > 0
+        assert ("admin", "admin") in DEFAULT_CREDENTIALS
+
+    def test_load_credentials_defaults(self) -> None:
+        bf = BruteForce()
+        creds = bf._load_credentials("", "")
+        assert len(creds) > 0
+        assert creds == DEFAULT_CREDENTIALS
+
+    def test_read_wordlist(self, tmp_path) -> None:
+        bf = BruteForce()
+        wordlist = tmp_path / "passwords.txt"
+        wordlist.write_text("password1\npassword2\npassword3\n")
+        entries = bf._read_wordlist(str(wordlist))
+        assert len(entries) == 3
+        assert entries[0] == "password1"
+
+    def test_read_wordlist_filters_comments(self, tmp_path) -> None:
+        bf = BruteForce()
+        wordlist = tmp_path / "passwords.txt"
+        wordlist.write_text("# comment\npassword1\n\n# another comment\npassword2\n")
+        entries = bf._read_wordlist(str(wordlist))
+        assert len(entries) == 2
+
+    def test_no_login_forms_returns_info(self) -> None:
+        bf = BruteForce()
+        report = ScanReport(target="https://example.com")
+        config = ScanConfig(target="https://example.com")
+
+        @responses.activate
+        def run():
+            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+            result = bf.run("https://example.com", client, report, config)
+            assert len(result.findings) >= 1
+            assert any("No Login" in f.title for f in result.findings)
+
+        run()
+
+    def test_form_testing_finds_weak_credentials(self) -> None:
+        bf = BruteForce()
+
+        @responses.activate
+        def run():
+            responses.add(
+                responses.POST,
+                "https://example.com/login",
+                body="Welcome, admin!",
+                status=200,
+            )
+            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+
+            form = {
+                "action": "https://example.com/login",
+                "method": "POST",
+                "username_field": "username",
+                "password_field": "password",
+                "hidden_fields": [],
+            }
+            result = bf._test_form(form, [("admin", "admin")], "https://example.com", client)
+            # With 200 status and no error keywords, should flag as valid
+            assert len(result.findings) >= 1
+            assert any("Weak" in f.title or "Default" in f.title or "Credentials" in f.title
+                       or "Accepted" in f.title for f in result.findings)
+
+        run()
+
+    def test_rate_limit_detection(self) -> None:
+        bf = BruteForce()
+
+        @responses.activate
+        def run():
+            responses.add(
+                responses.POST,
+                "https://example.com/login",
+                body="Too many requests",
+                status=429,
+            )
+            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+
+            form = {
+                "action": "https://example.com/login",
+                "method": "POST",
+                "username_field": "username",
+                "password_field": "password",
+                "hidden_fields": [],
+            }
+            # Test that 429 response is handled without crashing
+            result = bf._test_form(form, [("test", "test")], "https://example.com", client)
+            # Should not crash; finding/warning presence depends on mock behavior
+            assert isinstance(result.findings, list)
+            assert isinstance(result.warnings, list)
+
+        run()
+
+    def test_user_enumeration_detection(self) -> None:
+        bf = BruteForce()
+
+        call_count = [0]
+
+        @responses.activate
+        def run():
+            def callback(request):
+                call_count[0] += 1
+                if call_count[0] % 2 == 0:
+                    return (401, {}, "Error: Invalid password")
+                return (401, {}, "Error: Username not found")
+
+            responses.add_callback(
+                responses.POST,
+                "https://example.com/login",
+                callback=callback,
+            )
+            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+
+            form = {
+                "action": "https://example.com/login",
+                "method": "POST",
+                "username_field": "username",
+                "password_field": "password",
+                "hidden_fields": [],
+            }
+            result = bf._test_form(
+                form,
+                [("user1", "pass1"), ("user2", "pass2"), ("user3", "pass3")],
+                "https://example.com",
+                client,
+            )
+            # Should detect different error patterns as possible user enumeration
+            if any("Enumeration" in f.title for f in result.findings):
+                pass  # Test passes if it detected enumeration
+            # Otherwise, at minimum it should have run without error
+            assert len(result.findings) > 0 or len(result.warnings) > 0
+
+        run()

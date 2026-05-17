@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auth-scan"
+version = "0.2.0"
+description = "CLI web authentication security assessment tool"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "auth-scan Engineering Team"}
+]
+keywords = ["security", "authentication", "jwt", "pentest", "cli", "scanner", "oauth", "mfa"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "click>=8.1",
+    "rich>=13.5",
+    "requests>=2.31",
+    "pyjwt>=2.8",
+    "cryptography>=41.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "responses>=0.23",
+    "ruff>=0.1",
+    "mypy>=1.5",
+    "flask>=3.0",
+    "flask-sock>=0.7",
+]
+pdf = ["weasyprint>=60"]
+all = ["auth-scan[dev,pdf]"]
+
+[project.scripts]
+auth-scan = "auth_scan.cli:main"
+
+[project.entry-points."auth_scan.modules"]
+jwt = "auth_scan.attacks.jwt_analyzer:JWTAnalyzer"
+brute = "auth_scan.attacks.brute:BruteForce"
+session = "auth_scan.attacks.session_tests:SessionTester"
+oauth = "auth_scan.attacks.oauth:OAuthTester"
+mfa = "auth_scan.attacks.mfa:MfaBypass"
+websocket = "auth_scan.attacks.websocket_auth:WebSocketAuth"
+api_key = "auth_scan.attacks.api_key:ApiKeyAnalyzer"
+
+[project.urls]
+Homepage = "https://github.com/auth-scan/auth-scan"
+Repository = "https://github.com/auth-scan/auth-scan"
+Issues = "https://github.com/auth-scan/auth-scan/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
