@@ -1,4 +1,5 @@
 """Tests for the Session Tests attack module."""
+
 from __future__ import annotations
 
 import responses
@@ -46,9 +47,7 @@ class TestSessionTester:
             # Should have findings about cookie attributes
             assert len(result.findings) >= 1
             # The From_set_cookie parsing of the raw header
-            findings_with_cookie = [
-                f for f in result.findings if "session" in str(f.evidence).lower()
-            ]
+            findings_with_cookie = [f for f in result.findings if "session" in str(f.evidence).lower()]
             assert len(findings_with_cookie) >= 1
 
         run()
@@ -66,11 +65,11 @@ class TestSessionTester:
                 ],
             },
         ]
-        config = ScanConfig(target="https://example.com")
+        ScanConfig(target="https://example.com")
 
         @responses.activate
         def run():
-            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+            HTTPClient(base_url="https://example.com", rate_limit=100)
             findings = tester._check_csrf_tokens(report)
             assert len(findings) >= 1
             assert any("CSRF" in f.title for f in findings)
@@ -161,6 +160,7 @@ class TestSessionTester:
     def test_cookie_scope_check(self) -> None:
         tester = SessionTester()
         from auth_scan.core.session import CookieAnalysis
+
         cookies = [
             CookieAnalysis(
                 name="sessionid",
@@ -179,6 +179,7 @@ class TestSessionTester:
     def test_entropy_analysis_weak(self) -> None:
         tester = SessionTester()
         from auth_scan.core.session import CookieAnalysis
+
         cookies = [
             CookieAnalysis(
                 name="sessionid",

@@ -1,4 +1,5 @@
 """Tests for HTTP client."""
+
 from __future__ import annotations
 
 import pytest
@@ -98,6 +99,7 @@ class TestHTTPClient:
     @responses.activate
     def test_timeout_error_handling(self) -> None:
         import requests as req
+
         from auth_scan.core.exceptions import HttpError
 
         def slow_response(request):
@@ -107,7 +109,7 @@ class TestHTTPClient:
         client = HTTPClient(base_url="https://example.com", timeout=1)
         try:
             client.get("/slow")
-            assert False, "Should have raised HttpError"
+            raise AssertionError("Should have raised HttpError")
         except HttpError:
             assert len(client.request_history) == 1
             assert "Timeout" in client.request_history[0].error
@@ -115,6 +117,7 @@ class TestHTTPClient:
     @responses.activate
     def test_connection_error_handling(self) -> None:
         import requests as req
+
         from auth_scan.core.exceptions import HttpError
 
         def conn_refused(request):
@@ -124,7 +127,7 @@ class TestHTTPClient:
         client = HTTPClient(base_url="https://example.com")
         try:
             client.get("/")
-            assert False, "Should have raised HttpError"
+            raise AssertionError("Should have raised HttpError")
         except HttpError as e:
             assert "Connection failed" in str(e)
 
@@ -138,7 +141,7 @@ class TestHTTPClient:
         )
         try:
             client.get("https://evil.com/data")
-            assert False, "Should have raised ScopeError"
+            raise AssertionError("Should have raised ScopeError")
         except ScopeError as e:
             assert "blocked by scope" in str(e)
 
@@ -184,6 +187,7 @@ class TestProbeDuration:
         # would not call monotonic again because tokens are available.
         ticks = iter([0.0, 1.000, 1.000, 1.250])
         import auth_scan.core.http_client as http_mod
+
         monkeypatch.setattr(http_mod.time, "monotonic", lambda: next(ticks))
 
         client = HTTPClient(base_url="https://example.com", rate_limit=1000.0)

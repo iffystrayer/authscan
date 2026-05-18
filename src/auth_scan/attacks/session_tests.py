@@ -1,9 +1,9 @@
 """Session management vulnerability tests."""
+
 from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urljoin
 
 from auth_scan.attacks.base import (
     BaseAttackModule,
@@ -93,15 +93,17 @@ class SessionTester(BaseAttackModule):
                 cookie_analyses.append(analysis)
 
         if not cookie_analyses:
-            result.findings.append(Finding(
-                title="No Session Cookies Found",
-                description="No cookies were set by the server during probing. "
-                "The target may use stateless auth (JWT in Authorization header) or "
-                "a non-cookie session mechanism.",
-                severity=Severity.INFO,
-                module_name=self.name,
-                tags=["session"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="No Session Cookies Found",
+                    description="No cookies were set by the server during probing. "
+                    "The target may use stateless auth (JWT in Authorization header) or "
+                    "a non-cookie session mechanism.",
+                    severity=Severity.INFO,
+                    module_name=self.name,
+                    tags=["session"],
+                )
+            )
             return result
 
         # FR-ST-001: Report cookie attribute issues
@@ -110,26 +112,28 @@ class SessionTester(BaseAttackModule):
                 sev = Severity.HIGH if "Session cookie" in issue or "HttpOnly" in issue else Severity.MEDIUM
                 if "missing Secure" in issue.lower() and not is_https:
                     sev = Severity.LOW  # Less critical on HTTP
-                result.findings.append(Finding(
-                    title=f"Cookie Security Issue: {analysis.name}",
-                    description=issue,
-                    severity=sev,
-                    evidence={
-                        "cookie_name": analysis.name,
-                        "http_only": analysis.http_only,
-                        "secure": analysis.secure,
-                        "same_site": analysis.same_site or "not set",
-                        "domain": analysis.domain,
-                        "path": analysis.path,
-                        "is_session": analysis.is_session_cookie,
-                    },
-                    remediation=(
-                        "Set Secure, HttpOnly, and SameSite=Strict/Lax on all cookies, "
-                        "especially session cookies."
-                    ),
-                    module_name=self.name,
-                    tags=["session", "cookies"],
-                ))
+                result.findings.append(
+                    Finding(
+                        title=f"Cookie Security Issue: {analysis.name}",
+                        description=issue,
+                        severity=sev,
+                        evidence={
+                            "cookie_name": analysis.name,
+                            "http_only": analysis.http_only,
+                            "secure": analysis.secure,
+                            "same_site": analysis.same_site or "not set",
+                            "domain": analysis.domain,
+                            "path": analysis.path,
+                            "is_session": analysis.is_session_cookie,
+                        },
+                        remediation=(
+                            "Set Secure, HttpOnly, and SameSite=Strict/Lax on all cookies, "
+                            "especially session cookies."
+                        ),
+                        module_name=self.name,
+                        tags=["session", "cookies"],
+                    )
+                )
 
         # FR-ST-002: Session fixation test
         fixation_findings = self._test_session_fixation(target, http_client, report)
@@ -159,7 +163,10 @@ class SessionTester(BaseAttackModule):
         return result
 
     def _test_session_fixation(
-        self, target: str, http_client: Any, report: ScanReport,
+        self,
+        target: str,
+        http_client: Any,
+        report: ScanReport,
     ) -> list[Finding]:
         """FR-ST-002: Test if the server accepts a pre-authentication session ID."""
         findings: list[Finding] = []
@@ -167,7 +174,8 @@ class SessionTester(BaseAttackModule):
         # Find a session cookie from probe
         probe_cookies = report.metadata.get("probe_cookies", {})
         session_cookies = [
-            name for name in probe_cookies
+            name
+            for name in probe_cookies
             if any(h in name.lower() for h in ["session", "sid", "sess", "auth"])
         ]
 
@@ -187,36 +195,41 @@ class SessionTester(BaseAttackModule):
             # If it accepts and reflects our value, it's vulnerable
             response_cookies = dict(resp.cookies)
             if cookie_name in response_cookies and response_cookies[cookie_name] == fixed_value:
-                findings.append(Finding(
-                    title="Session Fixation Vulnerability",
-                    description=(
-                        f"The server accepted and retained a pre-set session ID "
-                        f"('{cookie_name}={fixed_value[:20]}...'). "
-                        "An attacker can set a known session ID in a victim's browser "
-                        "and hijack their session after login."
-                    ),
-                    severity=Severity.HIGH,
-                    evidence={
-                        "cookie_name": cookie_name,
-                        "fixed_value": fixed_value[:30] + "...",
-                        "accepted": True,
-                    },
-                    remediation=(
-                        "Always issue a new session ID upon successful authentication. "
-                        "Invalidate the old session ID."
-                    ),
-                    cwe_id="CWE-384",
-                    module_name=self.name,
-                    confidence=0.85,
-                    tags=["session", "fixation"],
-                ))
+                findings.append(
+                    Finding(
+                        title="Session Fixation Vulnerability",
+                        description=(
+                            f"The server accepted and retained a pre-set session ID "
+                            f"('{cookie_name}={fixed_value[:20]}...'). "
+                            "An attacker can set a known session ID in a victim's browser "
+                            "and hijack their session after login."
+                        ),
+                        severity=Severity.HIGH,
+                        evidence={
+                            "cookie_name": cookie_name,
+                            "fixed_value": fixed_value[:30] + "...",
+                            "accepted": True,
+                        },
+                        remediation=(
+                            "Always issue a new session ID upon successful authentication. "
+                            "Invalidate the old session ID."
+                        ),
+                        cwe_id="CWE-384",
+                        module_name=self.name,
+                        confidence=0.85,
+                        tags=["session", "fixation"],
+                    )
+                )
         except Exception:
             pass
 
         return findings
 
     def _test_session_invalidation(
-        self, target: str, http_client: Any, report: ScanReport,
+        self,
+        target: str,
+        http_client: Any,
+        report: ScanReport,
     ) -> list[Finding]:
         """FR-ST-003: Test if session is properly invalidated after logout."""
         findings: list[Finding] = []
@@ -245,39 +258,40 @@ class SessionTester(BaseAttackModule):
         for logout_url in logout_urls[:2]:
             try:
                 # Get current cookies
-                probe_cookies = report.metadata.get("probe_cookies", {})
+                report.metadata.get("probe_cookies", {})
                 # Make a request before logout to establish session
                 resp_before = http_client.get("/")
                 # Perform logout
-                resp_logout = http_client.get(logout_url)
+                http_client.get(logout_url)
                 # Try to use same cookies after logout
                 resp_after = http_client.get("/")
                 # If both before and after give similar responses with same cookies,
                 # session may not be invalidated
-                if (
-                    resp_before.status_code == resp_after.status_code == 200
-                    and len(resp_after.text) == len(resp_before.text)
+                if resp_before.status_code == resp_after.status_code == 200 and len(resp_after.text) == len(
+                    resp_before.text
                 ):
-                    findings.append(Finding(
-                        title="Session Not Invalidated on Logout",
-                        description=(
-                            f"After requesting {logout_url}, the session appeared to remain active. "
-                            "The server does not properly invalidate sessions on logout."
-                        ),
-                        severity=Severity.HIGH,
-                        evidence={
-                            "logout_url": logout_url,
-                            "before_status": resp_before.status_code,
-                            "after_status": resp_after.status_code,
-                            "response_same_length": len(resp_after.text) == len(resp_before.text),
-                        },
-                        remediation="Destroy the session server-side on logout. "
-                        "Clear the session cookie with Set-Cookie: session=; Max-Age=0.",
-                        cwe_id="CWE-613",
-                        module_name=self.name,
-                        confidence=0.7,
-                        tags=["session", "invalidation"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title="Session Not Invalidated on Logout",
+                            description=(
+                                f"After requesting {logout_url}, the session appeared to remain active. "
+                                "The server does not properly invalidate sessions on logout."
+                            ),
+                            severity=Severity.HIGH,
+                            evidence={
+                                "logout_url": logout_url,
+                                "before_status": resp_before.status_code,
+                                "after_status": resp_after.status_code,
+                                "response_same_length": len(resp_after.text) == len(resp_before.text),
+                            },
+                            remediation="Destroy the session server-side on logout. "
+                            "Clear the session cookie with Set-Cookie: session=; Max-Age=0.",
+                            cwe_id="CWE-613",
+                            module_name=self.name,
+                            confidence=0.7,
+                            tags=["session", "invalidation"],
+                        )
+                    )
                     break  # Found one, no need to check more
             except Exception:
                 pass
@@ -302,26 +316,28 @@ class SessionTester(BaseAttackModule):
                     for inp in inputs
                 )
                 if not has_csrf:
-                    findings.append(Finding(
-                        title=f"Missing CSRF Token on {method} Form",
-                        description=(
-                            f"Form at action='{form.get('action', '/')}' with method={method} "
-                            "has no CSRF token. This makes it vulnerable to cross-site "
-                            "request forgery attacks."
-                        ),
-                        severity=Severity.MEDIUM,
-                        evidence={
-                            "form_action": form.get("action", ""),
-                            "form_method": method,
-                            "input_names": [inp.get("name") for inp in inputs],
-                        },
-                        remediation="Add a CSRF token to all state-changing forms. "
-                        "Use framework-provided CSRF protection.",
-                        cwe_id="CWE-352",
-                        module_name=self.name,
-                        confidence=0.85,
-                        tags=["session", "csrf"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title=f"Missing CSRF Token on {method} Form",
+                            description=(
+                                f"Form at action='{form.get('action', '/')}' with method={method} "
+                                "has no CSRF token. This makes it vulnerable to cross-site "
+                                "request forgery attacks."
+                            ),
+                            severity=Severity.MEDIUM,
+                            evidence={
+                                "form_action": form.get("action", ""),
+                                "form_method": method,
+                                "input_names": [inp.get("name") for inp in inputs],
+                            },
+                            remediation="Add a CSRF token to all state-changing forms. "
+                            "Use framework-provided CSRF protection.",
+                            cwe_id="CWE-352",
+                            module_name=self.name,
+                            confidence=0.85,
+                            tags=["session", "csrf"],
+                        )
+                    )
 
         return findings
 
@@ -332,30 +348,34 @@ class SessionTester(BaseAttackModule):
 
         url_sessions = find_session_ids_in_content(probe_body)
         for entry in url_sessions:
-            findings.append(Finding(
-                title="Session ID in URL",
-                description=(
-                    f"Session token '{entry['token_name']}' found in URL. "
-                    "Session IDs in URLs are logged in server logs, browser history, "
-                    "and leaked via Referer headers."
-                ),
-                severity=Severity.HIGH,
-                evidence={
-                    "token_name": entry["token_name"],
-                    "token_value": "[REDACTED]",
-                },
-                remediation="Use HttpOnly, Secure cookies for session tokens. "
-                "Never pass session IDs in URL parameters.",
-                cwe_id="CWE-598",
-                module_name=self.name,
-                confidence=0.98,
-                tags=["session", "url-token"],
-            ))
+            findings.append(
+                Finding(
+                    title="Session ID in URL",
+                    description=(
+                        f"Session token '{entry['token_name']}' found in URL. "
+                        "Session IDs in URLs are logged in server logs, browser history, "
+                        "and leaked via Referer headers."
+                    ),
+                    severity=Severity.HIGH,
+                    evidence={
+                        "token_name": entry["token_name"],
+                        "token_value": "[REDACTED]",
+                    },
+                    remediation="Use HttpOnly, Secure cookies for session tokens. "
+                    "Never pass session IDs in URL parameters.",
+                    cwe_id="CWE-598",
+                    module_name=self.name,
+                    confidence=0.98,
+                    tags=["session", "url-token"],
+                )
+            )
 
         return findings
 
     def _analyze_entropy(
-        self, cookie_analyses: list[CookieAnalysis], probe_cookies: dict[str, str],
+        self,
+        cookie_analyses: list[CookieAnalysis],
+        probe_cookies: dict[str, str],
     ) -> list[Finding]:
         """FR-ST-007: Analyze session ID entropy."""
         findings: list[Finding] = []
@@ -363,35 +383,40 @@ class SessionTester(BaseAttackModule):
             if analysis.is_session_cookie and analysis.value:
                 entropy_result = analyze_session_id_entropy(analysis.value)
                 if entropy_result.get("assessment") == "weak":
-                    findings.append(Finding(
-                        title="Weak Session ID Entropy",
-                        description=(
-                            f"Session cookie '{analysis.name}' has low entropy "
-                            f"({entropy_result.get('entropy', 0):.1f} bits, "
-                            f"length={entropy_result.get('length', 0)}). "
-                            f"This makes session IDs predictable."
-                        ),
-                        severity=Severity.MEDIUM,
-                        evidence=entropy_result,
-                        remediation=(
-                            "Use a cryptographically secure random number generator (CSPRNG) "
-                            "to generate session IDs with at least 128 bits of entropy."
-                        ),
-                        cwe_id="CWE-330",
-                        module_name=self.name,
-                        confidence=0.8,
-                        tags=["session", "entropy"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title="Weak Session ID Entropy",
+                            description=(
+                                f"Session cookie '{analysis.name}' has low entropy "
+                                f"({entropy_result.get('entropy', 0):.1f} bits, "
+                                f"length={entropy_result.get('length', 0)}). "
+                                f"This makes session IDs predictable."
+                            ),
+                            severity=Severity.MEDIUM,
+                            evidence=entropy_result,
+                            remediation=(
+                                "Use a cryptographically secure random number generator (CSPRNG) "
+                                "to generate session IDs with at least 128 bits of entropy."
+                            ),
+                            cwe_id="CWE-330",
+                            module_name=self.name,
+                            confidence=0.8,
+                            tags=["session", "entropy"],
+                        )
+                    )
 
         return findings
 
     def _check_cookie_scope(
-        self, cookie_analyses: list[CookieAnalysis], target: str,
+        self,
+        cookie_analyses: list[CookieAnalysis],
+        target: str,
     ) -> list[Finding]:
         """FR-ST-005: Check for overly broad cookie scope."""
         findings: list[Finding] = []
 
         from urllib.parse import urlparse
+
         parsed = urlparse(target)
         hostname = parsed.hostname or ""
 
@@ -403,25 +428,27 @@ class SessionTester(BaseAttackModule):
 
                 # If cookie domain is a parent domain (fewer parts), it leaks to subdomains
                 if len(domain_parts) < len(host_parts) and analysis.is_session_cookie:
-                    findings.append(Finding(
-                        title="Broad Cookie Domain Scope",
-                        description=(
-                            f"Session cookie '{analysis.name}' has Domain={analysis.domain}, "
-                            f"which is broader than the current host ({hostname}). "
-                            "This cookie will be sent to subdomains, increasing attack surface."
-                        ),
-                        severity=Severity.MEDIUM,
-                        evidence={
-                            "cookie_name": analysis.name,
-                            "cookie_domain": analysis.domain,
-                            "host": hostname,
-                        },
-                        remediation="Set cookie Domain to the most specific hostname possible. "
-                        "Avoid using a leading dot or parent domains.",
-                        module_name=self.name,
-                        confidence=0.9,
-                        tags=["session", "scope"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title="Broad Cookie Domain Scope",
+                            description=(
+                                f"Session cookie '{analysis.name}' has Domain={analysis.domain}, "
+                                f"which is broader than the current host ({hostname}). "
+                                "This cookie will be sent to subdomains, increasing attack surface."
+                            ),
+                            severity=Severity.MEDIUM,
+                            evidence={
+                                "cookie_name": analysis.name,
+                                "cookie_domain": analysis.domain,
+                                "host": hostname,
+                            },
+                            remediation="Set cookie Domain to the most specific hostname possible. "
+                            "Avoid using a leading dot or parent domains.",
+                            module_name=self.name,
+                            confidence=0.9,
+                            tags=["session", "scope"],
+                        )
+                    )
 
             # Check for root path
             if analysis.path in ("/", "") and analysis.is_session_cookie:

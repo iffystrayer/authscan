@@ -1,6 +1,8 @@
 """Core assessment engine — orchestrates HTTP client and attack modules."""
+
 from __future__ import annotations
 
+import re
 import signal
 import sys
 import time
@@ -8,9 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from auth_scan.attacks.base import BaseAttackModule, Finding, ModuleResult, ScanReport, Severity
+from auth_scan.attacks.base import BaseAttackModule, Finding, ScanReport, Severity
 from auth_scan.core.config import ScanConfig
-from auth_scan.core.exceptions import AuthScanError, ConfigError, HttpError, ModuleError
+from auth_scan.core.exceptions import ConfigError, HttpError, ModuleError
 from auth_scan.core.http_client import HTTPClient
 from auth_scan.core.session import check_security_headers
 
@@ -28,6 +30,7 @@ def discover_modules() -> dict[str, type[BaseAttackModule]]:
     # Try entry_points first (supports external plugins)
     try:
         from importlib.metadata import entry_points
+
         discovered = entry_points(group="auth_scan.modules")
         for ep in discovered:
             try:
@@ -41,17 +44,22 @@ def discover_modules() -> dict[str, type[BaseAttackModule]]:
 
     # Fall back to built-in hardcoded registry if entry_points fails or returns nothing
     if not modules:
-        from auth_scan.attacks.jwt_analyzer import JWTAnalyzer
-        from auth_scan.attacks.brute import BruteForce
-        from auth_scan.attacks.session_tests import SessionTester
-        from auth_scan.attacks.oauth import OAuthTester
-        from auth_scan.attacks.mfa import MfaBypass
-        from auth_scan.attacks.websocket_auth import WebSocketAuth
         from auth_scan.attacks.api_key import ApiKeyAnalyzer
+        from auth_scan.attacks.brute import BruteForce
+        from auth_scan.attacks.jwt_analyzer import JWTAnalyzer
+        from auth_scan.attacks.mfa import MfaBypass
+        from auth_scan.attacks.oauth import OAuthTester
+        from auth_scan.attacks.session_tests import SessionTester
+        from auth_scan.attacks.websocket_auth import WebSocketAuth
 
         builtins: list[type[BaseAttackModule]] = [
-            JWTAnalyzer, BruteForce, SessionTester,
-            OAuthTester, MfaBypass, WebSocketAuth, ApiKeyAnalyzer,
+            JWTAnalyzer,
+            BruteForce,
+            SessionTester,
+            OAuthTester,
+            MfaBypass,
+            WebSocketAuth,
+            ApiKeyAnalyzer,
         ]
         for cls in builtins:
             if hasattr(cls, "name"):
@@ -108,9 +116,8 @@ class ScanEngine:
         self.report.completed_at = datetime.now(timezone.utc)
 
         from rich.console import Console
-        Console(stderr=True).print(
-            "\n[yellow]Shutdown requested. Saving partial results...[/yellow]"
-        )
+
+        Console(stderr=True).print("\n[yellow]Shutdown requested. Saving partial results...[/yellow]")
 
         # Save partial results
         try:
@@ -189,31 +196,37 @@ class ScanEngine:
 
         except ConfigError as e:
             self.report.status = "failed"
-            self.report.add_finding(Finding(
-                title="Configuration Error",
-                description=str(e),
-                severity=Severity.INFO,
-                module_name="engine",
-            ))
+            self.report.add_finding(
+                Finding(
+                    title="Configuration Error",
+                    description=str(e),
+                    severity=Severity.INFO,
+                    module_name="engine",
+                )
+            )
             raise
 
         except HttpError as e:
             self.report.status = "failed"
-            self.report.add_finding(Finding(
-                title="HTTP Error",
-                description=str(e),
-                severity=Severity.INFO,
-                module_name="engine",
-            ))
+            self.report.add_finding(
+                Finding(
+                    title="HTTP Error",
+                    description=str(e),
+                    severity=Severity.INFO,
+                    module_name="engine",
+                )
+            )
 
         except Exception as e:
             self.report.status = "failed"
-            self.report.add_finding(Finding(
-                title="Scan Error",
-                description=f"Unexpected error: {e}",
-                severity=Severity.INFO,
-                module_name="engine",
-            ))
+            self.report.add_finding(
+                Finding(
+                    title="Scan Error",
+                    description=f"Unexpected error: {e}",
+                    severity=Severity.INFO,
+                    module_name="engine",
+                )
+            )
             raise
 
         finally:
@@ -253,83 +266,93 @@ class ScanEngine:
 
             if not is_https and target_scheme == "https":
                 # HTTPS redirected to HTTP — potential downgrade attack
-                self.report.add_finding(Finding(
-                    title="HTTPS to HTTP Downgrade",
-                    description=(
-                        f"Target redirected from HTTPS to HTTP: {probe.redirect_chain}. "
-                        "This may indicate a misconfigured redirect or potential SSL stripping."
-                    ),
-                    severity=Severity.HIGH,
-                    evidence={"redirect_chain": probe.redirect_chain},
-                    remediation="Ensure all traffic uses HTTPS. Configure HSTS with includeSubDomains.",
-                    module_name="probe",
-                    tags=["ssl", "downgrade"],
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title="HTTPS to HTTP Downgrade",
+                        description=(
+                            f"Target redirected from HTTPS to HTTP: {probe.redirect_chain}. "
+                            "This may indicate a misconfigured redirect or potential SSL stripping."
+                        ),
+                        severity=Severity.HIGH,
+                        evidence={"redirect_chain": probe.redirect_chain},
+                        remediation="Ensure all traffic uses HTTPS. Configure HSTS with includeSubDomains.",
+                        module_name="probe",
+                        tags=["ssl", "downgrade"],
+                    )
+                )
 
             elif target_scheme == "http" and is_https:
                 # HTTP upgraded to HTTPS — good but worth noting original
-                self.report.add_finding(Finding(
-                    title="HTTP to HTTPS Redirect",
-                    description="Target redirected HTTP to HTTPS. This is good but the original HTTP endpoint still exists.",
-                    severity=Severity.LOW,
-                    evidence={"redirect_chain": probe.redirect_chain},
-                    remediation="Consider disabling HTTP entirely or using HSTS to enforce HTTPS.",
-                    module_name="probe",
-                    tags=["ssl", "redirect"],
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title="HTTP to HTTPS Redirect",
+                        description="Target redirected HTTP to HTTPS. This is good but the original HTTP endpoint still exists.",
+                        severity=Severity.LOW,
+                        evidence={"redirect_chain": probe.redirect_chain},
+                        remediation="Consider disabling HTTP entirely or using HSTS to enforce HTTPS.",
+                        module_name="probe",
+                        tags=["ssl", "redirect"],
+                    )
+                )
 
             elif not is_https:
-                self.report.add_finding(Finding(
-                    title="No TLS/HTTPS",
-                    description="Target is served over unencrypted HTTP. All traffic, including credentials, is transmitted in cleartext.",
-                    severity=Severity.HIGH,
-                    evidence={"scheme": "http"},
-                    remediation="Enable HTTPS with a valid TLS certificate. Redirect all HTTP traffic to HTTPS.",
-                    cwe_id="CWE-319",
-                    module_name="probe",
-                    tags=["ssl", "no-tls"],
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title="No TLS/HTTPS",
+                        description="Target is served over unencrypted HTTP. All traffic, including credentials, is transmitted in cleartext.",
+                        severity=Severity.HIGH,
+                        evidence={"scheme": "http"},
+                        remediation="Enable HTTPS with a valid TLS certificate. Redirect all HTTP traffic to HTTPS.",
+                        cwe_id="CWE-319",
+                        module_name="probe",
+                        tags=["ssl", "no-tls"],
+                    )
+                )
 
             # FR-SL-004: Security headers check
             header_checks = check_security_headers(probe.headers, is_https)
             for header_name, check in header_checks.items():
                 if not check["present"] and check["required"]:
                     severity = Severity.MEDIUM if check["severity"] == "medium" else Severity.LOW
-                    self.report.add_finding(Finding(
-                        title=f"Missing Security Header: {header_name}",
-                        description=check["message"],
-                        severity=severity,
-                        evidence={"header": header_name, "present": False},
-                        remediation=(
-                            f"Add the {header_name} header with appropriate directives. "
-                            "Refer to OWASP Secure Headers Project for guidance."
-                        ),
-                        module_name="probe",
-                        tags=["headers", header_name.lower()],
-                    ))
+                    self.report.add_finding(
+                        Finding(
+                            title=f"Missing Security Header: {header_name}",
+                            description=check["message"],
+                            severity=severity,
+                            evidence={"header": header_name, "present": False},
+                            remediation=(
+                                f"Add the {header_name} header with appropriate directives. "
+                                "Refer to OWASP Secure Headers Project for guidance."
+                            ),
+                            module_name="probe",
+                            tags=["headers", header_name.lower()],
+                        )
+                    )
 
             # Discovered forms info
             if probe.forms:
                 login_forms = [
-                    f for f in probe.forms
-                    if any(i.get("type") == "password" for i in f.get("inputs", []))
+                    f for f in probe.forms if any(i.get("type") == "password" for i in f.get("inputs", []))
                 ]
                 self.report.metadata["login_forms_discovered"] = len(login_forms)
                 if login_forms:
-                    self.report.add_finding(Finding(
-                        title="Login Form Discovered",
-                        description=f"Found {len(login_forms)} form(s) with password fields.",
-                        severity=Severity.INFO,
-                        evidence={
-                            "form_count": len(login_forms),
-                            "actions": [f.get("action") for f in login_forms],
-                        },
-                        module_name="probe",
-                        tags=["discovery", "forms"],
-                    ))
+                    self.report.add_finding(
+                        Finding(
+                            title="Login Form Discovered",
+                            description=f"Found {len(login_forms)} form(s) with password fields.",
+                            severity=Severity.INFO,
+                            evidence={
+                                "form_count": len(login_forms),
+                                "actions": [f.get("action") for f in login_forms],
+                            },
+                            module_name="probe",
+                            tags=["discovery", "forms"],
+                        )
+                    )
 
             # Check for JWTs in cookies
             from auth_scan.core.session import TokenInfo
+
             jwt_found = False
             for name, value in probe.cookies.items():
                 parts = value.split(".")
@@ -338,25 +361,30 @@ class ScanEngine:
                         token = TokenInfo.from_string(value, "cookie", name)
                         if token.is_jwt:
                             jwt_found = True
-                            self.report.metadata.setdefault("jwt_tokens", []).append({
-                                "location": "cookie",
-                                "name": name,
-                                "algorithm": token.algorithm,
-                                "expires": str(token.expires) if token.expires else None,
-                                "issues": token.issues,
-                            })
+                            self.report.metadata.setdefault("jwt_tokens", []).append(
+                                {
+                                    "location": "cookie",
+                                    "name": name,
+                                    "algorithm": token.algorithm,
+                                    "expires": str(token.expires) if token.expires else None,
+                                    "issues": token.issues,
+                                }
+                            )
                     except Exception:
                         pass
             if jwt_found:
-                self.report.add_finding(Finding(
-                    title="JWT Token in Cookies",
-                    description="JWT tokens found in browser cookies. Verify proper token handling.",
-                    severity=Severity.INFO,
-                    module_name="probe",
-                    tags=["jwt", "discovery"],
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title="JWT Token in Cookies",
+                        description="JWT tokens found in browser cookies. Verify proper token handling.",
+                        severity=Severity.INFO,
+                        module_name="probe",
+                        tags=["jwt", "discovery"],
+                    )
+                )
 
             import re
+
             # Check for sensitive info in response
             sensitive_patterns = [
                 (r"password\s*[=:]\s*[\"'][^\"']+[\"']", "password in response", Severity.HIGH),
@@ -366,33 +394,39 @@ class ScanEngine:
             ]
             for pattern, desc, sev in sensitive_patterns:
                 if re.search(pattern, probe.body, re.IGNORECASE):
-                    self.report.add_finding(Finding(
-                        title=f"Sensitive Information in Response: {desc}",
-                        description=f"Response body may contain {desc}.",
-                        severity=sev,
-                        module_name="probe",
-                        tags=["information-disclosure"],
-                    ))
+                    self.report.add_finding(
+                        Finding(
+                            title=f"Sensitive Information in Response: {desc}",
+                            description=f"Response body may contain {desc}.",
+                            severity=sev,
+                            module_name="probe",
+                            tags=["information-disclosure"],
+                        )
+                    )
 
             # Path Discovery (Phase 2)
             no_discovery = getattr(self.config, "no_discovery", False)
             if not no_discovery and not self._shutdown_requested:
-                from auth_scan.core.path_discovery import discover_paths, report_discoveries, AUTH_PATHS
+                from auth_scan.core.path_discovery import (
+                    discover_paths,
+                    report_discoveries,
+                )
+
                 path_results = discover_paths(self.http, timeout_per=3)
                 self.report.metadata["path_results"] = path_results
-                report_discoveries(
-                    self.report.findings, path_results, module_name="path_discovery"
-                )
+                report_discoveries(self.report.findings, path_results, module_name="path_discovery")
                 self._endpoints_tested += len(path_results)
 
         except HttpError as e:
-            self.report.add_finding(Finding(
-                title="Probe Failed",
-                description=f"Could not probe target: {e}",
-                severity=Severity.HIGH,
-                evidence={"error": str(e)},
-                module_name="probe",
-            ))
+            self.report.add_finding(
+                Finding(
+                    title="Probe Failed",
+                    description=f"Could not probe target: {e}",
+                    severity=Severity.HIGH,
+                    evidence={"error": str(e)},
+                    module_name="probe",
+                )
+            )
             raise
 
     def _run_modules(self) -> None:
@@ -416,12 +450,14 @@ class ScanEngine:
             if mod_name in module_map:
                 to_run.append(mod_name)
             else:
-                self.report.add_finding(Finding(
-                    title=f"Unknown Module: {mod_name}",
-                    description=f"Module '{mod_name}' was requested but is not available. Skipping.",
-                    severity=Severity.INFO,
-                    module_name="engine",
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title=f"Unknown Module: {mod_name}",
+                        description=f"Module '{mod_name}' was requested but is not available. Skipping.",
+                        severity=Severity.INFO,
+                        module_name="engine",
+                    )
+                )
 
         # Sort by priority
         to_run.sort(key=lambda m: module_map[m].priority)
@@ -454,7 +490,7 @@ class ScanEngine:
                 self.report.session_state.update(result.state_update)
 
                 # Track warnings
-                for warning in result.warnings:
+                for _warning in result.warnings:
                     # Log warning but don't add as finding
                     pass
 
@@ -462,21 +498,25 @@ class ScanEngine:
                 self._endpoints_tested += 1
 
             except ModuleError as e:
-                self.report.add_finding(Finding(
-                    title=f"Module Error: {mod_name}",
-                    description=str(e),
-                    severity=Severity.INFO,
-                    evidence={"module": mod_name, "error": str(e)},
-                    module_name="engine",
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title=f"Module Error: {mod_name}",
+                        description=str(e),
+                        severity=Severity.INFO,
+                        evidence={"module": mod_name, "error": str(e)},
+                        module_name="engine",
+                    )
+                )
             except Exception as e:
-                self.report.add_finding(Finding(
-                    title=f"Module Failed: {mod_name}",
-                    description=f"Module '{mod_name}' failed with error: {e}",
-                    severity=Severity.INFO,
-                    evidence={"module": mod_name, "error": str(e)},
-                    module_name="engine",
-                ))
+                self.report.add_finding(
+                    Finding(
+                        title=f"Module Failed: {mod_name}",
+                        description=f"Module '{mod_name}' failed with error: {e}",
+                        severity=Severity.INFO,
+                        evidence={"module": mod_name, "error": str(e)},
+                        module_name="engine",
+                    )
+                )
 
     def _run_agentic(self) -> None:
         """Run scan with the OODA agentic engine instead of sequential modules."""
@@ -489,17 +529,20 @@ class ScanEngine:
         model = AttackSurfaceModel(target=self.config.target)
 
         # Populate model from probe metadata
-        probe_body = self.report.metadata.get("probe_body", "")
+        self.report.metadata.get("probe_body", "")
         probe_url = self.report.metadata.get("probe_final_url", self.config.target)
 
         # Add probed endpoint
         from auth_scan.core.attack_surface import AuthEndpoint
-        model.add_endpoint(AuthEndpoint(
-            url=probe_url,
-            method="GET",
-            status=self.report.metadata.get("probe_status", 0),
-            response_headers=self.report.metadata.get("probe_headers", {}),
-        ))
+
+        model.add_endpoint(
+            AuthEndpoint(
+                url=probe_url,
+                method="GET",
+                status=self.report.metadata.get("probe_status", 0),
+                response_headers=self.report.metadata.get("probe_headers", {}),
+            )
+        )
 
         # Add forms
         probe_forms = self.report.metadata.get("probe_forms", [])
@@ -508,38 +551,46 @@ class ScanEngine:
             if action:
                 inputs = form.get("inputs", [])
                 has_pass = any(i.get("type") == "password" for i in inputs)
-                model.add_endpoint(AuthEndpoint(
-                    url=action,
-                    method=form.get("method", "POST"),
-                    auth_mechanism="form" if has_pass else None,
-                    form_fields=[i.get("name", "") for i in inputs if i.get("name")],
-                ))
+                model.add_endpoint(
+                    AuthEndpoint(
+                        url=action,
+                        method=form.get("method", "POST"),
+                        auth_mechanism="form" if has_pass else None,
+                        form_fields=[i.get("name", "") for i in inputs if i.get("name")],
+                    )
+                )
 
         # Add JWTs from cookies
         probe_cookies = self.report.metadata.get("probe_cookies", {})
         import re
+
         from auth_scan.core.attack_surface import ModelToken
+
         for name, value in probe_cookies.items():
             parts = value.split(".")
             if len(parts) == 3 and all(re.match(r"^[a-zA-Z0-9_-]+$", p) for p in parts):
                 from auth_scan.core.session import TokenInfo
+
                 try:
                     ti = TokenInfo.from_string(value, "cookie", name)
                     if ti.is_jwt:
-                        model.add_token(ModelToken(
-                            token_type="jwt",
-                            location=f"cookie:{name}",
-                            algorithm=ti.algorithm,
-                            claims=ti.payload or {},
-                            weaknesses=ti.issues.copy(),
-                            raw_preview=value[:40] + "...",
-                        ))
+                        model.add_token(
+                            ModelToken(
+                                token_type="jwt",
+                                location=f"cookie:{name}",
+                                algorithm=ti.algorithm,
+                                claims=ti.payload or {},
+                                weaknesses=ti.issues.copy(),
+                                raw_preview=value[:40] + "...",
+                            )
+                        )
                 except Exception:
                     pass
 
         # Add cookies as sessions
         from auth_scan.core.attack_surface import ModelSession
-        for name, value in probe_cookies.items():
+
+        for name, _value in probe_cookies.items():
             if any(h in name.lower() for h in ["session", "sid", "sess", "auth"]):
                 model.add_session(ModelSession(cookie_name=name))
 

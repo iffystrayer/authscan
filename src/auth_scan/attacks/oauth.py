@@ -1,9 +1,10 @@
 """OAuth 2.0 / OpenID Connect flow testing module."""
+
 from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import urljoin
 
 from auth_scan.attacks.base import (
     BaseAttackModule,
@@ -29,11 +30,19 @@ OAUTH_WELL_KNOWN_PATHS = [
 
 # OAuth-related keywords in page content
 OAUTH_KEYWORDS = [
-    "oauth", "oidc", "openid", "openid-connect",
-    "authorization_endpoint", "token_endpoint",
-    "client_id", "redirect_uri", "response_type",
-    "grant_type", "authorization_code",
-    "pkce", "code_challenge",
+    "oauth",
+    "oidc",
+    "openid",
+    "openid-connect",
+    "authorization_endpoint",
+    "token_endpoint",
+    "client_id",
+    "redirect_uri",
+    "response_type",
+    "grant_type",
+    "authorization_code",
+    "pkce",
+    "code_challenge",
 ]
 
 
@@ -66,17 +75,19 @@ class OAuthTester(BaseAttackModule):
         # Detect OAuth presence
         oauth_endpoints = self._discover_oauth_endpoints(target, http_client, report)
         if not oauth_endpoints:
-            result.findings.append(Finding(
-                title="No OAuth/OIDC Endpoints Found",
-                description="No OAuth 2.0 or OpenID Connect endpoints were detected.",
-                severity=Severity.INFO,
-                module_name=self.name,
-                tags=["oauth", "discovery"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="No OAuth/OIDC Endpoints Found",
+                    description="No OAuth 2.0 or OpenID Connect endpoints were detected.",
+                    severity=Severity.INFO,
+                    module_name=self.name,
+                    tags=["oauth", "discovery"],
+                )
+            )
             return result
 
         auth_url = oauth_endpoints.get("authorization_endpoint", "")
-        token_url = oauth_endpoints.get("token_endpoint", "")
+        oauth_endpoints.get("token_endpoint", "")
 
         # Test missing state parameter (CSRF)
         result.findings.extend(self._test_missing_state(auth_url, http_client, target))
@@ -99,7 +110,10 @@ class OAuthTester(BaseAttackModule):
         return result
 
     def _discover_oauth_endpoints(
-        self, target: str, http_client: Any, report: ScanReport,
+        self,
+        target: str,
+        http_client: Any,
+        report: ScanReport,
     ) -> dict[str, str]:
         """Discover OAuth/OIDC endpoints from probe data and well-known paths."""
         endpoints: dict[str, str] = {}
@@ -118,7 +132,7 @@ class OAuthTester(BaseAttackModule):
             r'(?:authorization_endpoint|token_endpoint|userinfo_endpoint|issuer)["\s:=]+(["\']?)(https?://[^\s"\'<,]+)',
             probe_body,
         ):
-            endpoints[match.group(1).strip('"\'')] = match.group(2).strip('"\'')
+            endpoints[match.group(1).strip("\"'")] = match.group(2).strip("\"'")
 
         # Check well-known paths
         for well_known in OAUTH_WELL_KNOWN_PATHS:
@@ -132,9 +146,13 @@ class OAuthTester(BaseAttackModule):
                             data = resp.json()
                             if isinstance(data, dict):
                                 for key in [
-                                    "authorization_endpoint", "token_endpoint",
-                                    "userinfo_endpoint", "issuer", "jwks_uri",
-                                    "registration_endpoint", "end_session_endpoint",
+                                    "authorization_endpoint",
+                                    "token_endpoint",
+                                    "userinfo_endpoint",
+                                    "issuer",
+                                    "jwks_uri",
+                                    "registration_endpoint",
+                                    "end_session_endpoint",
                                 ]:
                                     if key in data and isinstance(data[key], str):
                                         endpoints[key] = data[key]
@@ -156,7 +174,10 @@ class OAuthTester(BaseAttackModule):
         return endpoints
 
     def _test_missing_state(
-        self, auth_url: str, http_client: Any, target: str,
+        self,
+        auth_url: str,
+        http_client: Any,
+        target: str,
     ) -> list[Finding]:
         """Test if the authorization endpoint accepts requests without a state parameter."""
         findings: list[Finding] = []
@@ -177,35 +198,40 @@ class OAuthTester(BaseAttackModule):
                 # Check if response body mentions state or CSRF
                 body_lower = resp.text.lower()
                 if "state" not in body_lower and "csrf" not in body_lower:
-                    findings.append(Finding(
-                        title="OAuth Missing State Parameter (CSRF)",
-                        description=(
-                            "The OAuth authorization endpoint accepted a request "
-                            "without a 'state' parameter. This enables CSRF attacks "
-                            "during the OAuth flow, allowing an attacker to bind a "
-                            "victim's authorization to their own account."
-                        ),
-                        severity=Severity.HIGH,
-                        evidence={
-                            "authorization_url": auth_url,
-                            "params_sent": list(params.keys()),
-                        },
-                        remediation=(
-                            "Always include a random, unguessable 'state' parameter "
-                            "in authorization requests and validate it in the callback."
-                        ),
-                        cwe_id="CWE-352",
-                        module_name=self.name,
-                        confidence=0.8,
-                        tags=["oauth", "csrf", "state"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title="OAuth Missing State Parameter (CSRF)",
+                            description=(
+                                "The OAuth authorization endpoint accepted a request "
+                                "without a 'state' parameter. This enables CSRF attacks "
+                                "during the OAuth flow, allowing an attacker to bind a "
+                                "victim's authorization to their own account."
+                            ),
+                            severity=Severity.HIGH,
+                            evidence={
+                                "authorization_url": auth_url,
+                                "params_sent": list(params.keys()),
+                            },
+                            remediation=(
+                                "Always include a random, unguessable 'state' parameter "
+                                "in authorization requests and validate it in the callback."
+                            ),
+                            cwe_id="CWE-352",
+                            module_name=self.name,
+                            confidence=0.8,
+                            tags=["oauth", "csrf", "state"],
+                        )
+                    )
         except Exception:
             pass
 
         return findings
 
     def _test_redirect_uri(
-        self, auth_url: str, http_client: Any, target: str,
+        self,
+        auth_url: str,
+        http_client: Any,
+        target: str,
     ) -> list[Finding]:
         """Test redirect_uri validation with an attacker-controlled URL."""
         findings: list[Finding] = []
@@ -216,7 +242,9 @@ class OAuthTester(BaseAttackModule):
             "https://attacker.com/callback",
             "https://evil.com",
             "//attacker.com/callback",
-            "https://{}.attacker.com".format(target.replace("https://", "").replace("http://", "").split(":")[0]),
+            "https://{}.attacker.com".format(
+                target.replace("https://", "").replace("http://", "").split(":")[0]
+            ),
         ]
 
         for evil_uri in test_uris:
@@ -232,28 +260,30 @@ class OAuthTester(BaseAttackModule):
                 if resp.status_code in (302, 303):
                     location = resp.headers.get("Location", resp.headers.get("location", ""))
                     if "attacker.com" in location or "evil.com" in location:
-                        findings.append(Finding(
-                            title="OAuth Open Redirect in redirect_uri",
-                            description=(
-                                f"The authorization server accepted and redirected to "
-                                f"an arbitrary redirect_uri: {evil_uri}. "
-                                "This allows attackers to steal authorization codes."
-                            ),
-                            severity=Severity.CRITICAL,
-                            evidence={
-                                "redirect_uri": evil_uri,
-                                "redirected_to": location,
-                            },
-                            remediation=(
-                                "Strictly validate redirect_uri against a whitelist. "
-                                "Use exact matching, not substring checks."
-                            ),
-                            cwe_id="CWE-601",
-                            cvss_score=8.1,
-                            module_name=self.name,
-                            confidence=0.95,
-                            tags=["oauth", "open-redirect", "critical"],
-                        ))
+                        findings.append(
+                            Finding(
+                                title="OAuth Open Redirect in redirect_uri",
+                                description=(
+                                    f"The authorization server accepted and redirected to "
+                                    f"an arbitrary redirect_uri: {evil_uri}. "
+                                    "This allows attackers to steal authorization codes."
+                                ),
+                                severity=Severity.CRITICAL,
+                                evidence={
+                                    "redirect_uri": evil_uri,
+                                    "redirected_to": location,
+                                },
+                                remediation=(
+                                    "Strictly validate redirect_uri against a whitelist. "
+                                    "Use exact matching, not substring checks."
+                                ),
+                                cwe_id="CWE-601",
+                                cvss_score=8.1,
+                                module_name=self.name,
+                                confidence=0.95,
+                                tags=["oauth", "open-redirect", "critical"],
+                            )
+                        )
                         break
             except Exception:
                 pass
@@ -261,7 +291,10 @@ class OAuthTester(BaseAttackModule):
         return findings
 
     def _test_implicit_flow(
-        self, auth_url: str, http_client: Any, target: str,
+        self,
+        auth_url: str,
+        http_client: Any,
+        target: str,
     ) -> list[Finding]:
         """Test if implicit flow (response_type=token) is supported."""
         findings: list[Finding] = []
@@ -277,31 +310,35 @@ class OAuthTester(BaseAttackModule):
             }
             resp = http_client.get(auth_url, params=params)
             if resp.status_code in (200, 302):
-                findings.append(Finding(
-                    title="OAuth Implicit Flow Supported",
-                    description=(
-                        "The authorization server supports 'response_type=token' "
-                        "(implicit flow). Implicit flow exposes access tokens in "
-                        "URL fragments and should be replaced with authorization "
-                        "code flow with PKCE."
-                    ),
-                    severity=Severity.MEDIUM,
-                    evidence={"response_type": "token", "status": resp.status_code},
-                    remediation=(
-                        "Disable implicit flow. Use authorization code flow with "
-                        "PKCE for all clients."
-                    ),
-                    module_name=self.name,
-                    confidence=0.85,
-                    tags=["oauth", "implicit-flow"],
-                ))
+                findings.append(
+                    Finding(
+                        title="OAuth Implicit Flow Supported",
+                        description=(
+                            "The authorization server supports 'response_type=token' "
+                            "(implicit flow). Implicit flow exposes access tokens in "
+                            "URL fragments and should be replaced with authorization "
+                            "code flow with PKCE."
+                        ),
+                        severity=Severity.MEDIUM,
+                        evidence={"response_type": "token", "status": resp.status_code},
+                        remediation=(
+                            "Disable implicit flow. Use authorization code flow with PKCE for all clients."
+                        ),
+                        module_name=self.name,
+                        confidence=0.85,
+                        tags=["oauth", "implicit-flow"],
+                    )
+                )
         except Exception:
             pass
 
         return findings
 
     def _test_missing_pkce(
-        self, auth_url: str, http_client: Any, target: str,
+        self,
+        auth_url: str,
+        http_client: Any,
+        target: str,
     ) -> list[Finding]:
         """Test if PKCE is required for public clients."""
         findings: list[Finding] = []
@@ -321,31 +358,35 @@ class OAuthTester(BaseAttackModule):
                 # Check if the response indicates PKCE is required
                 body_lower = resp.text.lower()
                 if "code_challenge" not in body_lower and "pkce" not in body_lower:
-                    findings.append(Finding(
-                        title="OAuth PKCE Not Enforced",
-                        description=(
-                            "The authorization server did not require PKCE "
-                            "(code_challenge) for the authorization request. "
-                            "PKCE is mandatory for public clients."
-                        ),
-                        severity=Severity.HIGH,
-                        evidence={"pkce_required": False},
-                        remediation=(
-                            "Enforce PKCE for all public clients. Require "
-                            "code_challenge and code_challenge_method=S256."
-                        ),
-                        cwe_id="CWE-862",
-                        module_name=self.name,
-                        confidence=0.75,
-                        tags=["oauth", "pkce"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title="OAuth PKCE Not Enforced",
+                            description=(
+                                "The authorization server did not require PKCE "
+                                "(code_challenge) for the authorization request. "
+                                "PKCE is mandatory for public clients."
+                            ),
+                            severity=Severity.HIGH,
+                            evidence={"pkce_required": False},
+                            remediation=(
+                                "Enforce PKCE for all public clients. Require "
+                                "code_challenge and code_challenge_method=S256."
+                            ),
+                            cwe_id="CWE-862",
+                            module_name=self.name,
+                            confidence=0.75,
+                            tags=["oauth", "pkce"],
+                        )
+                    )
         except Exception:
             pass
 
         return findings
 
     def _check_client_secret_exposure(
-        self, report: ScanReport, target: str,
+        self,
+        report: ScanReport,
+        target: str,
     ) -> list[Finding]:
         """Check for client secrets leaked in page source."""
         findings: list[Finding] = []
@@ -358,29 +399,35 @@ class OAuthTester(BaseAttackModule):
         ]
 
         for pattern, label in secret_patterns:
-            for match in re.finditer(pattern, probe_body, re.IGNORECASE):
-                findings.append(Finding(
-                    title=f"OAuth {label} in Client-Side Code",
-                    description=(
-                        f"An OAuth {label.lower()} was found in the page source. "
-                        "Secrets in client-side code can be extracted by anyone."
-                    ),
-                    severity=Severity.CRITICAL,
-                    evidence={"type": label, "found_in": "page source"},
-                    remediation=(
-                        f"Remove the {label.lower()} from client-side code. "
-                        "Use a backend proxy for OAuth token exchanges."
-                    ),
-                    cwe_id="CWE-798",
-                    module_name=self.name,
-                    confidence=0.95,
-                    tags=["oauth", "secret-exposure"],
-                ))
+            for _match in re.finditer(pattern, probe_body, re.IGNORECASE):
+                findings.append(
+                    Finding(
+                        title=f"OAuth {label} in Client-Side Code",
+                        description=(
+                            f"An OAuth {label.lower()} was found in the page source. "
+                            "Secrets in client-side code can be extracted by anyone."
+                        ),
+                        severity=Severity.CRITICAL,
+                        evidence={"type": label, "found_in": "page source"},
+                        remediation=(
+                            f"Remove the {label.lower()} from client-side code. "
+                            "Use a backend proxy for OAuth token exchanges."
+                        ),
+                        cwe_id="CWE-798",
+                        module_name=self.name,
+                        confidence=0.95,
+                        tags=["oauth", "secret-exposure"],
+                    )
+                )
 
         return findings
 
     def _test_scope_escalation(
-        self, auth_url: str, http_client: Any, target: str, config: Any,
+        self,
+        auth_url: str,
+        http_client: Any,
+        target: str,
+        config: Any,
     ) -> list[Finding]:
         """Test if scope escalation is possible."""
         findings: list[Finding] = []
@@ -401,27 +448,29 @@ class OAuthTester(BaseAttackModule):
             }
             resp = http_client.get(auth_url, params=params)
             if resp.status_code in (200, 302, 303):
-                location = resp.headers.get("Location", resp.headers.get("location", ""))
+                resp.headers.get("Location", resp.headers.get("location", ""))
                 body_lower = resp.text.lower()
                 # If the server accepts our scope without complaint
                 if "invalid_scope" not in body_lower and "invalid scope" not in body_lower:
-                    findings.append(Finding(
-                        title="OAuth Scope Escalation Possible",
-                        description=(
-                            f"The server accepted an authorization request with "
-                            f"scope '{escalated_scopes}' without rejecting it. "
-                            "This may allow privilege escalation."
-                        ),
-                        severity=Severity.MEDIUM,
-                        evidence={"scope_tested": escalated_scopes, "status": resp.status_code},
-                        remediation=(
-                            "Validate scopes server-side. Only grant scopes that "
-                            "the requesting client is authorized to request."
-                        ),
-                        module_name=self.name,
-                        confidence=0.6,
-                        tags=["oauth", "scope-escalation"],
-                    ))
+                    findings.append(
+                        Finding(
+                            title="OAuth Scope Escalation Possible",
+                            description=(
+                                f"The server accepted an authorization request with "
+                                f"scope '{escalated_scopes}' without rejecting it. "
+                                "This may allow privilege escalation."
+                            ),
+                            severity=Severity.MEDIUM,
+                            evidence={"scope_tested": escalated_scopes, "status": resp.status_code},
+                            remediation=(
+                                "Validate scopes server-side. Only grant scopes that "
+                                "the requesting client is authorized to request."
+                            ),
+                            module_name=self.name,
+                            confidence=0.6,
+                            tags=["oauth", "scope-escalation"],
+                        )
+                    )
         except Exception:
             pass
 

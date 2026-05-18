@@ -1,4 +1,5 @@
 """Multi-format reporter: terminal, JSON, Markdown, HTML, PDF, SARIF."""
+
 from __future__ import annotations
 
 import sys
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from auth_scan.attacks.base import Finding, ScanReport, Severity, _redact_value
+from auth_scan.attacks.base import ScanReport, Severity, _redact_value
 
 
 @dataclass
@@ -74,10 +75,12 @@ class TerminalReporter:
 
         # Header
         console.print()
-        console.print(Panel.fit(
-            "[bold blue]auth-scan[/bold blue] v0.1.0 — Web Authentication Security Scanner",
-            border_style="blue",
-        ))
+        console.print(
+            Panel.fit(
+                "[bold blue]auth-scan[/bold blue] v0.1.0 — Web Authentication Security Scanner",
+                border_style="blue",
+            )
+        )
 
         console.print(f"Target: {report.target}")
         console.print(f"Started: {report.started_at.isoformat()}")
@@ -94,7 +97,13 @@ class TerminalReporter:
         table.add_column("Description", width=40)
         table.add_column("Module", width=12)
 
-        severity_order = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]
+        severity_order = [
+            Severity.CRITICAL,
+            Severity.HIGH,
+            Severity.MEDIUM,
+            Severity.LOW,
+            Severity.INFO,
+        ]
         sorted_findings = sorted(
             report.findings,
             key=lambda f: severity_order.index(f.severity) if f.severity in severity_order else 99,
@@ -157,8 +166,8 @@ class MarkdownReporter:
         summary = _compute_summary(report, endpoints_tested)
         lines: list[str] = []
 
-        lines.append(f"# auth-scan Security Assessment Report")
-        lines.append(f"")
+        lines.append("# auth-scan Security Assessment Report")
+        lines.append("")
         lines.append(f"**Target:** {report.target}")
         lines.append(f"**Scan ID:** {report.scan_id}")
         lines.append(f"**Started:** {report.started_at.isoformat()}")
@@ -166,44 +175,51 @@ class MarkdownReporter:
             lines.append(f"**Completed:** {report.completed_at.isoformat()}")
         lines.append(f"**Duration:** {summary.duration_seconds:.1f}s")
         lines.append(f"**Risk Score:** {summary.risk_score}/100")
-        lines.append(f"")
+        lines.append("")
 
         # Executive summary
-        lines.append(f"## Executive Summary")
-        lines.append(f"")
-        lines.append(f"| Severity | Count |")
-        lines.append(f"|----------|-------|")
+        lines.append("## Executive Summary")
+        lines.append("")
+        lines.append("| Severity | Count |")
+        lines.append("|----------|-------|")
         lines.append(f"| 💀 CRITICAL | {summary.critical} |")
         lines.append(f"| 🔴 HIGH     | {summary.high} |")
         lines.append(f"| 🟠 MEDIUM   | {summary.medium} |")
         lines.append(f"| 🟡 LOW      | {summary.low} |")
         lines.append(f"| ℹ️ INFO     | {summary.info} |")
         lines.append(f"| **Total**   | **{summary.total_findings}** |")
-        lines.append(f"")
+        lines.append("")
 
         if summary.top_recommendations:
-            lines.append(f"### Top Recommendations")
+            lines.append("### Top Recommendations")
             for i, rec in enumerate(summary.top_recommendations[:5], 1):
                 lines.append(f"{i}. {rec}")
-            lines.append(f"")
+            lines.append("")
 
         # Findings detail
-        lines.append(f"## Findings")
-        lines.append(f"")
+        lines.append("## Findings")
+        lines.append("")
 
-        severity_order = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]
+        severity_order = [
+            Severity.CRITICAL,
+            Severity.HIGH,
+            Severity.MEDIUM,
+            Severity.LOW,
+            Severity.INFO,
+        ]
         sorted_findings = sorted(
             report.findings,
             key=lambda f: severity_order.index(f.severity) if f.severity in severity_order else 99,
         )
 
         import json
+
         for i, finding in enumerate(sorted_findings, 1):
             finding_dict = finding.to_dict(redact=redact)
             lines.append(f"### {i}. {finding.severity.icon} {finding.title}")
-            lines.append(f"")
-            lines.append(f"| Attribute | Value |")
-            lines.append(f"|-----------|-------|")
+            lines.append("")
+            lines.append("| Attribute | Value |")
+            lines.append("|-----------|-------|")
             lines.append(f"| Severity  | {finding.severity.value.upper()} |")
             lines.append(f"| Module    | {finding.module_name} |")
             lines.append(f"| Confidence | {finding.confidence:.0%} |")
@@ -211,29 +227,30 @@ class MarkdownReporter:
                 lines.append(f"| CWE       | {finding.cwe_id} |")
             if finding.cvss_score:
                 lines.append(f"| CVSS      | {finding.cvss_score} |")
-            lines.append(f"")
+            lines.append("")
             lines.append(f"**Description:** {finding_dict.get('description', '')}")
-            lines.append(f"")
+            lines.append("")
             evidence = finding_dict.get("evidence") or {}
             if evidence:
-                lines.append(f"**Evidence:**")
-                lines.append(f"```json")
+                lines.append("**Evidence:**")
+                lines.append("```json")
                 lines.append(json.dumps(evidence, indent=2))
-                lines.append(f"```")
-                lines.append(f"")
+                lines.append("```")
+                lines.append("")
             remediation = finding_dict.get("remediation", "")
             if remediation:
                 lines.append(f"**Remediation:** {remediation}")
-                lines.append(f"")
+                lines.append("")
 
         # Appendix
-        lines.append(f"## Appendix: Scan Configuration")
-        lines.append(f"")
-        lines.append(f"```json")
+        lines.append("## Appendix: Scan Configuration")
+        lines.append("")
+        lines.append("```json")
         import json
+
         lines.append(json.dumps(report.config_snapshot, indent=2))
-        lines.append(f"```")
-        lines.append(f"")
+        lines.append("```")
+        lines.append("")
 
         return "\n".join(lines)
 
@@ -361,7 +378,11 @@ class HtmlReporter:
         summary = _compute_summary(report, endpoints_tested)
 
         severity_order = [
-            Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO,
+            Severity.CRITICAL,
+            Severity.HIGH,
+            Severity.MEDIUM,
+            Severity.LOW,
+            Severity.INFO,
         ]
         sorted_findings = sorted(
             report.findings,
@@ -372,12 +393,14 @@ class HtmlReporter:
         finding_items = []
         for f in sorted_findings:
             d = f.to_dict(redact=redact)
-            finding_items.append({
-                "finding": f,
-                "description": d.get("description", ""),
-                "remediation": d.get("remediation", ""),
-                "evidence": d.get("evidence") or {},
-            })
+            finding_items.append(
+                {
+                    "finding": f,
+                    "description": d.get("description", ""),
+                    "remediation": d.get("remediation", ""),
+                    "evidence": d.get("evidence") or {},
+                }
+            )
 
         template = Template(self.HTML_TEMPLATE)
         return template.render(
@@ -394,10 +417,10 @@ class PdfReporter:
         """Render report to PDF bytes using WeasyPrint."""
         try:
             from weasyprint import HTML
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "WeasyPrint is required for PDF output. Install with: pip install auth-scan[pdf]"
-            )
+            ) from exc
 
         html_reporter = HtmlReporter()
         html_content = html_reporter.render(report, endpoints_tested, redact=redact)
@@ -425,52 +448,60 @@ class SarifReporter:
             remediation = scrub(finding.remediation)
             if rule_id not in seen_rules:
                 seen_rules[rule_id] = len(rules)
-                rules.append({
-                    "id": rule_id,
-                    "name": finding.title,
-                    "shortDescription": {"text": description[:200]},
-                    "fullDescription": {"text": description},
-                    "help": {
-                        "text": remediation,
-                        "markdown": f"**Remediation:** {remediation}",
-                    },
-                    "properties": {
-                        "security-severity": str(finding.cvss_score or finding.severity.numeric),
-                        "tags": finding.tags,
-                    },
-                })
+                rules.append(
+                    {
+                        "id": rule_id,
+                        "name": finding.title,
+                        "shortDescription": {"text": description[:200]},
+                        "fullDescription": {"text": description},
+                        "help": {
+                            "text": remediation,
+                            "markdown": f"**Remediation:** {remediation}",
+                        },
+                        "properties": {
+                            "security-severity": str(finding.cvss_score or finding.severity.numeric),
+                            "tags": finding.tags,
+                        },
+                    }
+                )
 
-            results.append({
-                "ruleId": rule_id,
-                "ruleIndex": seen_rules[rule_id],
-                "message": {"text": description},
-                "level": _severity_to_sarif_level(finding.severity),
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": {"uri": report.target},
-                        "region": {"startLine": 1, "startColumn": 1},
+            results.append(
+                {
+                    "ruleId": rule_id,
+                    "ruleIndex": seen_rules[rule_id],
+                    "message": {"text": description},
+                    "level": _severity_to_sarif_level(finding.severity),
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": report.target},
+                                "region": {"startLine": 1, "startColumn": 1},
+                            },
+                        }
+                    ],
+                    "properties": {
+                        "confidence": str(finding.confidence),
+                        "module": finding.module_name,
                     },
-                }],
-                "properties": {
-                    "confidence": str(finding.confidence),
-                    "module": finding.module_name,
-                },
-            })
+                }
+            )
 
         sarif = {
             "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
             "version": "2.1.0",
-            "runs": [{
-                "tool": {
-                    "driver": {
-                        "name": "auth-scan",
-                        "version": "0.1.0",
-                        "informationUri": "https://github.com/auth-scan/auth-scan",
-                        "rules": rules,
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "auth-scan",
+                            "version": "0.1.0",
+                            "informationUri": "https://github.com/auth-scan/auth-scan",
+                            "rules": rules,
+                        },
                     },
-                },
-                "results": results,
-            }],
+                    "results": results,
+                }
+            ],
         }
 
         return json.dumps(sarif, indent=2)
@@ -479,6 +510,7 @@ class SarifReporter:
 def _sanitize_rule_id(title: str) -> str:
     """Convert a finding title to a safe rule ID component."""
     import re
+
     sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", title).strip("-").upper()
     return sanitized[:50] if sanitized else "UNKNOWN"
 
@@ -580,10 +612,12 @@ class Reporter:
 
             except ImportError as e:
                 from rich.console import Console
+
                 Console(stderr=True).print(f"[yellow]Warning:[/yellow] {e}")
                 results[fmt] = f"error: {e}"
             except Exception as e:
                 from rich.console import Console
+
                 Console(stderr=True).print(f"[red]Error generating {fmt} report:[/red] {e}")
                 results[fmt] = f"error: {e}"
 

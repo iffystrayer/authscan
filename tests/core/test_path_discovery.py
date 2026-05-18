@@ -1,4 +1,5 @@
 """Tests for path discovery."""
+
 from __future__ import annotations
 
 import responses

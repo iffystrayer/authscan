@@ -23,6 +23,7 @@ Vulnerabilities:
 - Exposed API keys in page source (/config)
 - Accessible paths: /api, /admin, /backup, .well-known endpoints
 """
+
 import datetime
 import hashlib
 import hmac
@@ -38,8 +39,8 @@ app = Flask(__name__)
 # WEAK: Hardcoded, weak secret key
 app.secret_key = "super-secret-key-that-is-not-random-123"
 app.config["SESSION_COOKIE_HTTPONLY"] = False  # VULN: No HttpOnly
-app.config["SESSION_COOKIE_SECURE"] = False     # VULN: No Secure
-app.config["SESSION_COOKIE_SAMESITE"] = None    # VULN: No SameSite
+app.config["SESSION_COOKIE_SECURE"] = False  # VULN: No Secure
+app.config["SESSION_COOKIE_SAMESITE"] = None  # VULN: No SameSite
 
 # WEAK: Hardcoded JWT secret
 JWT_SECRET = "weak-secret-12345"
@@ -117,11 +118,13 @@ REGISTER_PAGE = """<!DOCTYPE html>
 
 def base64url_encode(data: bytes) -> str:
     import base64
+
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
 def base64url_decode(data: str) -> bytes:
     import base64
+
     padding = 4 - len(data) % 4
     if padding != 4:
         data += "=" * padding
@@ -162,9 +165,7 @@ def verify_jwt(token: str) -> dict | None:
         # Normal verification (weak HS256)
         if alg == "HS256":
             signing_input = f"{parts[0]}.{parts[1]}".encode()
-            expected_sig = hmac.new(
-                JWT_SECRET.encode(), signing_input, hashlib.sha256
-            ).digest()
+            expected_sig = hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
             actual_sig = base64url_decode(parts[2])
             if hmac.compare_digest(expected_sig, actual_sig):
                 return payload
@@ -190,6 +191,7 @@ def verify_jwt(token: str) -> dict | None:
 
 def login_required(f):
     """Decorator that checks for a valid session or JWT."""
+
     @wraps(f)
     def decorated(*args, **kwargs):
         # Check session cookie
@@ -205,11 +207,13 @@ def login_required(f):
                 return f(*args, **kwargs)
 
         return jsonify({"error": "Unauthorized"}), 401
+
     return decorated
 
 
 def jwt_optional(f):
     """Allow access but parse JWT if present."""
+
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.cookies.get("auth_token")
@@ -219,6 +223,7 @@ def jwt_optional(f):
         else:
             request.jwt_payload = None  # type: ignore[attr-defined]
         return f(*args, **kwargs)
+
     return decorated
 
 
@@ -259,24 +264,27 @@ def login():
     session["role"] = "admin" if username == "admin" else "user"
 
     # Create JWT with sensitive data (VULN)
-    jwt_token = create_jwt({
-        "sub": username,
-        "email": f"{username}@example.com",  # VULN: PII in JWT
-        "role": session["role"],
-        "iat": int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
-        "exp": int(
-            (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30))
-            .timestamp()
-        ),  # VULN: Long expiry (30 days)
-    })
+    jwt_token = create_jwt(
+        {
+            "sub": username,
+            "email": f"{username}@example.com",  # VULN: PII in JWT
+            "role": session["role"],
+            "iat": int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+            "exp": int(
+                (
+                    datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
+                ).timestamp()
+            ),  # VULN: Long expiry (30 days)
+        }
+    )
 
     resp = make_response(redirect("/dashboard"))
     resp.set_cookie(
         "auth_token",
         jwt_token,
-        httponly=False,   # VULN: No HttpOnly
-        secure=False,     # VULN: No Secure
-        samesite=None,    # VULN: No SameSite
+        httponly=False,  # VULN: No HttpOnly
+        secure=False,  # VULN: No Secure
+        samesite=None,  # VULN: No SameSite
         max_age=30 * 24 * 3600,  # VULN: 30 day session
     )
     return resp
@@ -340,7 +348,7 @@ def profile():
 def logout():
     """Logout — VULN: does not invalidate session server-side."""
     # VULN: Session ID in URL parameter
-    session_id = request.args.get("sessionid", "")
+    request.args.get("sessionid", "")
     # VULN: Only clears client-side cookie, not server-side session
     session.pop("user", None)
     resp = make_response(redirect("/login"))
@@ -354,7 +362,7 @@ def logout():
 def api_profile():
     """API endpoint — VULNERABLE: JWT with sensitive data."""
     username = session.get("user", "unknown")
-    token_payload = getattr(request, "jwt_payload", None)
+    getattr(request, "jwt_payload", None)
 
     response_data = {
         "username": username,
@@ -371,12 +379,14 @@ def api_profile():
 def api_user():
     """User info endpoint — VULN: returns sensitive data."""
     username = session.get("user", "unknown")
-    return jsonify({
-        "username": username,
-        "email": f"{username}@example.com",
-        "role": session.get("role", "user"),
-        "password_hash": "not-a-real-hash-but-exposed",  # VULN: password field in response
-    })
+    return jsonify(
+        {
+            "username": username,
+            "email": f"{username}@example.com",
+            "role": session.get("role", "user"),
+            "password_hash": "not-a-real-hash-but-exposed",  # VULN: password field in response
+        }
+    )
 
 
 # ── OAuth 2.0 Stubs (Phase 2) ─────────────────────────────────
@@ -405,32 +415,36 @@ def oauth_authorize():
 @app.route("/oauth/token", methods=["POST"])
 def oauth_token():
     """OAuth token endpoint — VULN: accepts any code, no PKCE check."""
-    grant_type = request.form.get("grant_type", "")
+    request.form.get("grant_type", "")
     # VULN: No client authentication
     # VULN: No code_verifier/PKCE check
-    return jsonify({
-        "access_token": "fake-access-token-for-testing",
-        "token_type": "bearer",
-        "expires_in": 3600,
-        "refresh_token": "fake-refresh-token",
-        "scope": "openid profile email admin",
-    })
+    return jsonify(
+        {
+            "access_token": "fake-access-token-for-testing",
+            "token_type": "bearer",
+            "expires_in": 3600,
+            "refresh_token": "fake-refresh-token",
+            "scope": "openid profile email admin",
+        }
+    )
 
 
 @app.route("/.well-known/openid-configuration")
 def oidc_configuration():
     """OIDC discovery endpoint — exposes OAuth endpoints."""
     base = request.host_url.rstrip("/")
-    return jsonify({
-        "issuer": f"{base}",
-        "authorization_endpoint": f"{base}/oauth/authorize",
-        "token_endpoint": f"{base}/oauth/token",
-        "userinfo_endpoint": f"{base}/api/user",
-        "jwks_uri": f"{base}/.well-known/jwks.json",
-        "response_types_supported": ["code", "token"],
-        "grant_types_supported": ["authorization_code", "implicit"],
-        "code_challenge_methods_supported": ["S256"],
-    })
+    return jsonify(
+        {
+            "issuer": f"{base}",
+            "authorization_endpoint": f"{base}/oauth/authorize",
+            "token_endpoint": f"{base}/oauth/token",
+            "userinfo_endpoint": f"{base}/api/user",
+            "jwks_uri": f"{base}/.well-known/jwks.json",
+            "response_types_supported": ["code", "token"],
+            "grant_types_supported": ["authorization_code", "implicit"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+    )
 
 
 @app.route("/.well-known/jwks.json")

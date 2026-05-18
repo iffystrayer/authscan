@@ -1,4 +1,5 @@
 """Configuration management — YAML loading, profiles, env vars, validation."""
+
 from __future__ import annotations
 
 import os
@@ -168,20 +169,15 @@ class ScanConfig:
             raise ConfigError(f"max_depth must be >= 1, got {self.max_depth}")
         if not 0.0 <= self.confidence_threshold <= 1.0:
             raise ConfigError(
-                f"confidence_threshold must be between 0.0 and 1.0, "
-                f"got {self.confidence_threshold}"
+                f"confidence_threshold must be between 0.0 and 1.0, got {self.confidence_threshold}"
             )
         valid_auth_types = {"", "bearer", "basic", "form", "cookie"}
         if self.auth_type not in valid_auth_types:
-            raise ConfigError(
-                f"auth_type must be one of {valid_auth_types}, got '{self.auth_type}'"
-            )
+            raise ConfigError(f"auth_type must be one of {valid_auth_types}, got '{self.auth_type}'")
         valid_formats = {"terminal", "json", "markdown", "html", "pdf", "sarif"}
         for fmt in self.output_formats:
             if fmt not in valid_formats:
-                raise ConfigError(
-                    f"output format must be one of {valid_formats}, got '{fmt}'"
-                )
+                raise ConfigError(f"output format must be one of {valid_formats}, got '{fmt}'")
 
     def merge_cli_overrides(self, **kwargs: Any) -> ScanConfig:
         """Merge CLI flag overrides into the config."""
@@ -219,7 +215,7 @@ def _apply_env_overrides(config_dict: dict[str, Any]) -> dict[str, Any]:
         if not env_key.startswith(env_prefix):
             continue
         # Convert AUTH_SCAN_RATE_LIMIT -> rate_limit
-        key_path = env_key[len(env_prefix):].lower().split("__")
+        key_path = env_key[len(env_prefix) :].lower().split("__")
 
         # Type coercion
         typed_val: Any = env_val
@@ -233,6 +229,7 @@ def _apply_env_overrides(config_dict: dict[str, Any]) -> dict[str, Any]:
             typed_val = float(env_val)
         elif env_val.startswith("[") and env_val.endswith("]"):
             import json
+
             try:
                 typed_val = json.loads(env_val)
             except json.JSONDecodeError:
@@ -280,9 +277,7 @@ def load_config(
     if profile:
         if profile not in profiles:
             available = ", ".join(profiles.keys()) or "none"
-            raise ConfigError(
-                f"Profile '{profile}' not found. Available profiles: {available}"
-            )
+            raise ConfigError(f"Profile '{profile}' not found. Available profiles: {available}")
         config_dict = _deep_merge(config_dict, profiles[profile])
         config_dict.pop("profiles", None)
 
@@ -308,11 +303,29 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
 
     # Top-level simple fields
     simple_fields = [
-        "target", "rate_limit", "timeout", "user_agent", "proxy",
-        "no_verify", "ca_bundle", "no_redact", "no_color", "verbose", "quiet",
-        "wordlist", "user_wordlist", "jwt_wordlist", "agentic", "max_depth",
-        "confidence_threshold", "resume_scan_id", "quick",
-        "no_discovery", "no_mfa", "oauth_scope", "output_file",
+        "target",
+        "rate_limit",
+        "timeout",
+        "user_agent",
+        "proxy",
+        "no_verify",
+        "ca_bundle",
+        "no_redact",
+        "no_color",
+        "verbose",
+        "quiet",
+        "wordlist",
+        "user_wordlist",
+        "jwt_wordlist",
+        "agentic",
+        "max_depth",
+        "confidence_threshold",
+        "resume_scan_id",
+        "quick",
+        "no_discovery",
+        "no_mfa",
+        "oauth_scope",
+        "output_file",
     ]
     for field_name in simple_fields:
         if field_name in d:

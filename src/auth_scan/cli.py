@@ -1,14 +1,13 @@
 """Command-line interface for auth-scan."""
+
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from typing import Optional
 
 import click
 
 from auth_scan import __version__
-from auth_scan.core.config import ScanConfig, generate_default_config, load_config
+from auth_scan.core.config import generate_default_config, load_config
 from auth_scan.core.engine import all_module_names, run_assessment
 from auth_scan.core.exceptions import AuthScanError, ConfigError
 from auth_scan.core.reporter import Reporter
@@ -36,13 +35,15 @@ class AuthScanCommand(click.Command):
 )
 @click.argument("target", required=False, default="")
 @click.option(
-    "--modules", "-m",
+    "--modules",
+    "-m",
     multiple=True,
     type=click.Choice(["probe", "jwt", "session", "brute", "oauth", "mfa", "websocket", "api_key", "all"]),
     help="Attack modules to run. Use 'all' for every module. Repeatable.",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     "output_formats",
     multiple=True,
     type=click.Choice(["terminal", "json", "markdown", "html", "pdf", "sarif"]),
@@ -50,13 +51,15 @@ class AuthScanCommand(click.Command):
     help="Output formats. Repeatable for multiple formats.",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     "config_path",
     type=click.Path(exists=True, dir_okay=False),
     help="Path to YAML config file.",
 )
 @click.option(
-    "--profile", "-P",
+    "--profile",
+    "-P",
     help="Named profile from config file.",
 )
 @click.option(
@@ -125,7 +128,8 @@ class AuthScanCommand(click.Command):
     help="Bearer token or API key for authenticated scanning.",
 )
 @click.option(
-    "--wordlist", "-w",
+    "--wordlist",
+    "-w",
     type=click.Path(exists=True, dir_okay=False),
     help="Password wordlist path.",
 )
@@ -140,12 +144,14 @@ class AuthScanCommand(click.Command):
     help="Allowed domain (repeatable). Default: target domain only.",
 )
 @click.option(
-    "--verbose", "-v",
+    "--verbose",
+    "-v",
     count=True,
     help="Increase verbosity (-v, -vv, -vvv).",
 )
 @click.option(
-    "--quiet", "-q",
+    "--quiet",
+    "-q",
     is_flag=True,
     help="Suppress all output except errors and summary.",
 )
@@ -226,38 +232,38 @@ def main(
     target: str,
     modules: tuple[str, ...],
     output_formats: tuple[str, ...],
-    config_path: Optional[str],
-    profile: Optional[str],
+    config_path: str | None,
+    profile: str | None,
     quick: bool,
     agentic: bool,
     max_depth: int,
     confidence_threshold: float,
-    rate_limit: Optional[int],
-    timeout: Optional[int],
-    proxy: Optional[str],
+    rate_limit: int | None,
+    timeout: int | None,
+    proxy: str | None,
     cookies_raw: tuple[str, ...],
     headers_raw: tuple[str, ...],
-    auth_type: Optional[str],
-    username: Optional[str],
-    password: Optional[str],
-    token: Optional[str],
-    wordlist: Optional[str],
-    user_wordlist: Optional[str],
+    auth_type: str | None,
+    username: str | None,
+    password: str | None,
+    token: str | None,
+    wordlist: str | None,
+    user_wordlist: str | None,
     scope: tuple[str, ...],
     verbose: int,
     quiet: bool,
     no_color: bool,
     no_redact: bool,
-    resume_scan_id: Optional[str],
+    resume_scan_id: str | None,
     no_verify: bool,
-    ca_bundle: Optional[str],
+    ca_bundle: str | None,
     output_dir: str,
-    output_file: Optional[str],
+    output_file: str | None,
     init_config: bool,
-    jwt_wordlist: Optional[str],
+    jwt_wordlist: str | None,
     no_discovery: bool,
     no_mfa: bool,
-    oauth_scope: Optional[str],
+    oauth_scope: str | None,
 ) -> None:
     """Web authentication security assessment tool.
 
@@ -381,11 +387,11 @@ def main(
     # Print header
     if not config.quiet:
         from rich.console import Console
+
         console = Console(no_color=config.no_color)
         console.print()
         console.print(
-            f"[bold blue]auth-scan[/bold blue] v{__version__} — "
-            f"Web Authentication Security Scanner"
+            f"[bold blue]auth-scan[/bold blue] v{__version__} — Web Authentication Security Scanner"
         )
         console.print(f"Target: {config.target}")
         mods = config.modules.copy()
@@ -436,6 +442,7 @@ def main(
     # Print file output paths
     if not config.quiet:
         from rich.console import Console
+
         console = Console(no_color=config.no_color)
         for fmt, path in saved_paths.items():
             if fmt != "terminal" and not path.startswith("error"):

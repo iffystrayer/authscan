@@ -1,4 +1,5 @@
 """Tests for session analysis utilities."""
+
 from __future__ import annotations
 
 import base64
@@ -34,12 +35,18 @@ class TestTokenInfo:
         assert not token.is_jwt
 
     def test_expired_token_detection(self) -> None:
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": "HS256", "typ": "JWT"}).encode()
-        ).rstrip(b"=").decode()
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"sub": "user", "exp": 1}).encode()  # way in the past
-        ).rstrip(b"=").decode()
+        header = (
+            base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+            .rstrip(b"=")
+            .decode()
+        )
+        payload = (
+            base64.urlsafe_b64encode(
+                json.dumps({"sub": "user", "exp": 1}).encode()  # way in the past
+            )
+            .rstrip(b"=")
+            .decode()
+        )
         expired = f"{header}.{payload}.sig"
         token = TokenInfo.from_string(expired)
         assert token.is_jwt
@@ -47,28 +54,34 @@ class TestTokenInfo:
         assert any("expired" in i.lower() for i in token.issues)
 
     def test_sensitive_data_detection(self) -> None:
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": "HS256"}).encode()
-        ).rstrip(b"=").decode()
-        payload = base64.urlsafe_b64encode(
-            json.dumps({
-                "sub": "user",
-                "email": "admin@example.com",
-                "password": "secret123",
-            }).encode()
-        ).rstrip(b"=").decode()
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=").decode()
+        payload = (
+            base64.urlsafe_b64encode(
+                json.dumps(
+                    {
+                        "sub": "user",
+                        "email": "admin@example.com",
+                        "password": "secret123",
+                    }
+                ).encode()
+            )
+            .rstrip(b"=")
+            .decode()
+        )
         token = TokenInfo.from_string(f"{header}.{payload}.sig")
         issues = token.has_sensitive_data()
         assert len(issues) >= 2
         assert any("password" in i.lower() for i in issues)
 
     def test_missing_recommended_claims(self) -> None:
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": "HS256"}).encode()
-        ).rstrip(b"=").decode()
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"sub": "user"}).encode()  # missing iat, jti
-        ).rstrip(b"=").decode()
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=").decode()
+        payload = (
+            base64.urlsafe_b64encode(
+                json.dumps({"sub": "user"}).encode()  # missing iat, jti
+            )
+            .rstrip(b"=")
+            .decode()
+        )
         token = TokenInfo.from_string(f"{header}.{payload}.sig")
         assert any("iat" in i for i in token.issues)
         assert any("jti" in i for i in token.issues)

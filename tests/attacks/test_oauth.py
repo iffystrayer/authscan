@@ -1,4 +1,5 @@
 """Tests for OAuth tester module."""
+
 from __future__ import annotations
 
 import responses
