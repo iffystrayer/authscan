@@ -52,6 +52,20 @@ dev = [
 pdf = ["weasyprint>=60"]
 all = ["auth-scan[dev,pdf]"]
 
+# PEP 735 dependency groups (used by `uv sync --group dev`). Mirrors the
+# `[project.optional-dependencies].dev` list so `pip install -e .[dev]`
+# also works for non-uv users.
+[dependency-groups]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "responses>=0.23",
+    "ruff>=0.1",
+    "mypy>=1.5",
+    "flask>=3.0",
+    "flask-sock>=0.7",
+]
+
 [project.scripts]
 auth-scan = "auth_scan.cli:main"
 

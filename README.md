@@ -98,22 +98,25 @@ AUTH_SCAN_RATE_LIMIT=5 AUTH_SCAN_PROXY=http://127.0.0.1:8080 auth-scan https://e
 
 ## Development
 
+We use [uv](https://docs.astral.sh/uv/) for reproducible dev environments. The lockfile `uv.lock` is committed; `uv sync` will materialise the exact resolved set every time.
+
 ```bash
-# Clone and install in dev mode
+# Clone and install (creates .venv, installs the project + dev group)
 git clone https://github.com/auth-scan/auth-scan
 cd auth-scan
-pip install -e ".[dev]"
+uv sync --group dev
 
-# Run tests
-pytest
+# Run tests / lint / typecheck via uv (no activate needed)
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src/
 
-# Lint
-ruff check .
-ruff format --check .
-
-# Type check
-mypy src/
+# Run the CLI itself against a target
+uv run auth-scan https://example.com
 ```
+
+If you prefer plain pip, `pip install -e ".[dev]"` still works — uv just makes the bootstrap faster and pinned.
 
 ## License
 
