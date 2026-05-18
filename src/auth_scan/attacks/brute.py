@@ -79,6 +79,9 @@ class BruteForce(BaseAttackModule):
     version = "1.0.0"
     priority = 30
 
+    # Set in run() from config.no_redact. Default redacts (safe).
+    _no_redact: bool = False
+
     def run(
         self,
         target: str,
@@ -87,6 +90,10 @@ class BruteForce(BaseAttackModule):
         config: Any,
     ) -> ModuleResult:
         result = ModuleResult()
+
+        # Track redaction mode from config so evidence dicts can honor --no-redact.
+        # Default to redacted when the attribute is absent.
+        self._no_redact: bool = bool(getattr(config, "no_redact", False))
 
         # FR-BF-001: Discover login forms
         login_forms = self._discover_login_forms(report)
@@ -309,13 +316,16 @@ class BruteForce(BaseAttackModule):
 
             if entry["status"] in (200, 302) and not is_error:
                 found_valid = True
+                password_for_description = creds[1] if self._no_redact else "[REDACTED]"
                 result.findings.append(Finding(
                     title="Weak/Default Credentials Accepted",
-                    description=f"Login succeeded with credentials: {creds[0]}:{creds[1]}",
+                    description=(
+                        f"Login succeeded with credentials: {creds[0]}:{password_for_description}"
+                    ),
                     severity=Severity.CRITICAL,
                     evidence={
                         "username": creds[0],
-                        "password": "[REDACTED]" if not getattr(self, "_no_redact", True) else creds[1],
+                        "password": creds[1] if self._no_redact else "[REDACTED]",
                         "status": entry["status"],
                         "body_preview": entry["body_preview"][:200],
                         "form_url": form_url,

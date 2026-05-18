@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from auth_scan.attacks.base import Finding, ScanReport, Severity
+from auth_scan.attacks.base import Finding, ScanReport, Severity, _redact_value
 
 
 @dataclass
@@ -61,7 +61,7 @@ class TerminalReporter:
     def __init__(self, use_color: bool = True) -> None:
         self.use_color = use_color
 
-    def render(self, report: ScanReport, endpoints_tested: int = 0) -> None:
+    def render(self, report: ScanReport, endpoints_tested: int = 0, redact: bool = True) -> None:
         """Render scan results to the terminal using Rich."""
         from rich.console import Console
         from rich.panel import Panel
@@ -151,7 +151,7 @@ class JsonReporter:
 class MarkdownReporter:
     """Consultant-grade Markdown report."""
 
-    def render(self, report: ScanReport, endpoints_tested: int = 0) -> str:
+    def render(self, report: ScanReport, endpoints_tested: int = 0, redact: bool = True) -> str:
         """Render report to Markdown string."""
         summary = _compute_summary(report, endpoints_tested)
         lines: list[str] = []
@@ -196,7 +196,9 @@ class MarkdownReporter:
             key=lambda f: severity_order.index(f.severity) if f.severity in severity_order else 99,
         )
 
+        import json
         for i, finding in enumerate(sorted_findings, 1):
+            finding_dict = finding.to_dict(redact=redact)
             lines.append(f"### {i}. {finding.severity.icon} {finding.title}")
             lines.append(f"")
             lines.append(f"| Attribute | Value |")
@@ -209,17 +211,18 @@ class MarkdownReporter:
             if finding.cvss_score:
                 lines.append(f"| CVSS      | {finding.cvss_score} |")
             lines.append(f"")
-            lines.append(f"**Description:** {finding.description}")
+            lines.append(f"**Description:** {finding_dict.get('description', '')}")
             lines.append(f"")
-            if finding.evidence:
+            evidence = finding_dict.get("evidence") or {}
+            if evidence:
                 lines.append(f"**Evidence:**")
                 lines.append(f"```json")
-                import json
-                lines.append(json.dumps(finding.evidence, indent=2))
+                lines.append(json.dumps(evidence, indent=2))
                 lines.append(f"```")
                 lines.append(f"")
-            if finding.remediation:
-                lines.append(f"**Remediation:** {finding.remediation}")
+            remediation = finding_dict.get("remediation", "")
+            if remediation:
+                lines.append(f"**Remediation:** {remediation}")
                 lines.append(f"")
 
         # Appendix
@@ -311,7 +314,8 @@ class HtmlReporter:
     {% endif %}
 
     <h2>Findings</h2>
-    {% for finding in sorted_findings %}
+    {% for item in finding_items %}
+    {% set finding = item.finding %}
     {% set severity_class = finding.severity.value %}
     <div class="finding {{ severity_class }}">
         <h3>
@@ -328,20 +332,25 @@ class HtmlReporter:
             <tr><td>CVSS</td><td>{{ finding.cvss_score }}</td></tr>
             {% endif %}
         </table>
-        <p><strong>Description:</strong> {{ finding.description }}</p>
-        {% if finding.evidence %}
+        <p><strong>Description:</strong> {{ item.description }}</p>
+        {% if item.evidence %}
         <p><strong>Evidence:</strong></p>
-        <pre class="evidence">{{ finding.evidence | tojson(indent=2) }}</pre>
+        <pre class="evidence">{{ item.evidence | tojson(indent=2) }}</pre>
         {% endif %}
-        {% if finding.remediation %}
-        <p><strong>Remediation:</strong> {{ finding.remediation }}</p>
+        {% if item.remediation %}
+        <p><strong>Remediation:</strong> {{ item.remediation }}</p>
         {% endif %}
     </div>
     {% endfor %}
 </body>
 </html>"""
 
-    def render(self, report: ScanReport, endpoints_tested: int = 0) -> str:
+    def render(
+        self,
+        report: ScanReport,
+        endpoints_tested: int = 0,
+        redact: bool = True,
+    ) -> str:
         """Render report to standalone HTML using Jinja2."""
         try:
             from jinja2 import Template
@@ -358,18 +367,29 @@ class HtmlReporter:
             key=lambda f: severity_order.index(f.severity) if f.severity in severity_order else 99,
         )
 
+        # Pre-redact per-finding fields so the template never touches raw values.
+        finding_items = []
+        for f in sorted_findings:
+            d = f.to_dict(redact=redact)
+            finding_items.append({
+                "finding": f,
+                "description": d.get("description", ""),
+                "remediation": d.get("remediation", ""),
+                "evidence": d.get("evidence") or {},
+            })
+
         template = Template(self.HTML_TEMPLATE)
         return template.render(
             report=report,
             summary=summary,
-            sorted_findings=sorted_findings,
+            finding_items=finding_items,
         )
 
 
 class PdfReporter:
     """PDF report via WeasyPrint (stub when not installed)."""
 
-    def render(self, report: ScanReport, endpoints_tested: int = 0) -> bytes:
+    def render(self, report: ScanReport, endpoints_tested: int = 0, redact: bool = True) -> bytes:
         """Render report to PDF bytes using WeasyPrint."""
         try:
             from weasyprint import HTML
@@ -379,14 +399,14 @@ class PdfReporter:
             )
 
         html_reporter = HtmlReporter()
-        html_content = html_reporter.render(report, endpoints_tested)
+        html_content = html_reporter.render(report, endpoints_tested, redact=redact)
         return HTML(string=html_content).write_pdf()
 
 
 class SarifReporter:
     """SARIF v2.1.0 output for GitHub code scanning integration."""
 
-    def render(self, report: ScanReport) -> str:
+    def render(self, report: ScanReport, redact: bool = True) -> str:
         """Render report to SARIF v2.1.0 JSON string."""
         import json
 
@@ -395,18 +415,23 @@ class SarifReporter:
 
         seen_rules: dict[str, int] = {}
 
+        def scrub(text: str) -> str:
+            return _redact_value(text) if redact and isinstance(text, str) else text
+
         for finding in report.findings:
             rule_id = f"AUTH-SCAN-{finding.module_name.upper()}-{_sanitize_rule_id(finding.title)}"
+            description = scrub(finding.description)
+            remediation = scrub(finding.remediation)
             if rule_id not in seen_rules:
                 seen_rules[rule_id] = len(rules)
                 rules.append({
                     "id": rule_id,
                     "name": finding.title,
-                    "shortDescription": {"text": finding.description[:200]},
-                    "fullDescription": {"text": finding.description},
+                    "shortDescription": {"text": description[:200]},
+                    "fullDescription": {"text": description},
                     "help": {
-                        "text": finding.remediation,
-                        "markdown": f"**Remediation:** {finding.remediation}",
+                        "text": remediation,
+                        "markdown": f"**Remediation:** {remediation}",
                     },
                     "properties": {
                         "security-severity": str(finding.cvss_score or finding.severity.numeric),
@@ -417,7 +442,7 @@ class SarifReporter:
             results.append({
                 "ruleId": rule_id,
                 "ruleIndex": seen_rules[rule_id],
-                "message": {"text": finding.description},
+                "message": {"text": description},
                 "level": _severity_to_sarif_level(finding.severity),
                 "locations": [{
                     "physicalLocation": {
@@ -492,44 +517,45 @@ class Reporter:
         safe_target = target.replace("https://", "").replace("http://", "").replace("/", "-")[:50]
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+        redact = not self.no_redact
         for fmt in self.output_formats:
             try:
                 if fmt == "terminal":
                     term = TerminalReporter()
-                    term.render(report, endpoints_tested)
+                    term.render(report, endpoints_tested, redact=redact)
                     results["terminal"] = "stdout"
 
                 elif fmt == "json":
                     json_rep = JsonReporter()
-                    content = json_rep.render(report, redact=not self.no_redact)
+                    content = json_rep.render(report, redact=redact)
                     path = Path(output_dir) / f"{safe_target}-{timestamp}.json"
                     path.write_text(content)
                     results["json"] = str(path)
 
                 elif fmt == "markdown":
                     md_rep = MarkdownReporter()
-                    content = md_rep.render(report, endpoints_tested)
+                    content = md_rep.render(report, endpoints_tested, redact=redact)
                     path = Path(output_dir) / f"{safe_target}-{timestamp}.md"
                     path.write_text(content)
                     results["markdown"] = str(path)
 
                 elif fmt == "html":
                     html_rep = HtmlReporter()
-                    content = html_rep.render(report, endpoints_tested)
+                    content = html_rep.render(report, endpoints_tested, redact=redact)
                     path = Path(output_dir) / f"{safe_target}-{timestamp}.html"
                     path.write_text(content)
                     results["html"] = str(path)
 
                 elif fmt == "pdf":
                     pdf_rep = PdfReporter()
-                    pdf_bytes = pdf_rep.render(report, endpoints_tested)
+                    pdf_bytes = pdf_rep.render(report, endpoints_tested, redact=redact)
                     path = Path(output_dir) / f"{safe_target}-{timestamp}.pdf"
                     path.write_bytes(pdf_bytes)
                     results["pdf"] = str(path)
 
                 elif fmt == "sarif":
                     sarif_rep = SarifReporter()
-                    content = sarif_rep.render(report)
+                    content = sarif_rep.render(report, redact=redact)
                     path = Path(output_dir) / f"{safe_target}-{timestamp}.sarif.json"
                     path.write_text(content)
                     results["sarif"] = str(path)
