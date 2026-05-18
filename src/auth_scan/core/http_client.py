@@ -311,6 +311,7 @@ class HTTPClient:
         redirect_chain: list[str] = []
         final_url = url
 
+        start_time = time.monotonic()
         try:
             # Direct request to base_url to avoid urljoin quirks
             self.rate_limiter.acquire()
@@ -375,7 +376,7 @@ class HTTPClient:
             tls_version=tls_version,
             request_id=request_id,
             redirect_chain=redirect_chain,
-            duration_ms=(time.monotonic() - time.monotonic()) * 1000,  # approximate
+            duration_ms=(time.monotonic() - start_time) * 1000,
         )
 
     def close(self) -> None:
