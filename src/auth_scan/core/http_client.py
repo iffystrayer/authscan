@@ -185,6 +185,10 @@ class ProbeResult:
     request_id: str
     redirect_chain: list[str]
     duration_ms: float
+    # True if the probe fell back from HTTPS to plain HTTP. Engine emits a
+    # MEDIUM finding when this is set; opt-in via HTTPClient(
+    # allow_http_fallback=True).
+    http_fallback_attempted: bool = False
 
 
 class HTTPClient:
@@ -215,10 +219,12 @@ class HTTPClient:
         cookies: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         allow_private_redirects: bool = False,
+        allow_http_fallback: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.allow_private_redirects = allow_private_redirects
+        self.allow_http_fallback = allow_http_fallback
 
         self.session = requests.Session()
         self.rate_limiter = RateLimiter(rate=rate_limit)
@@ -445,14 +451,28 @@ class HTTPClient:
         return self.request("OPTIONS", path, **kwargs)
 
     def probe(self) -> ProbeResult:
-        """Perform the initial probe request and extract metadata."""
+        """Perform the initial probe request and extract metadata.
+
+        Catches both `HttpError` and `requests.exceptions.RequestException`
+        on the HTTPS path; the previous code caught only HttpError, which
+        the session.get() call never raises directly (H3).
+
+        HTTPS-to-HTTP fallback is gated on `allow_http_fallback` (default
+        False — H4). When fallback succeeds, ``http_fallback_attempted``
+        is set on the returned ProbeResult and a console warning is
+        emitted; the engine converts that into a MEDIUM finding.
+        """
+        import logging
+
         from bs4 import BeautifulSoup
 
+        log = logging.getLogger(__name__)
         request_id = self._generate_request_id()
         url = self.base_url  # probe the exact target URL, not always /
 
         redirect_chain: list[str] = []
         final_url = url
+        http_fallback_attempted = False
 
         start_time = time.monotonic()
         try:
@@ -465,24 +485,42 @@ class HTTPClient:
             response = self.session.get(url, timeout=self.timeout, allow_redirects=False)
             response, manual_chain = self._follow_redirects(response, "GET", {"timeout": self.timeout})
             redirect_chain.extend(manual_chain)
-        except HttpError:
-            # Try HTTP fallback
-            if url.startswith("https://"):
-                fallback = url.replace("https://", "http://", 1)
-                self._check_scope(fallback)
-                self.rate_limiter.acquire()
-                try:
-                    response = self.session.get(fallback, timeout=self.timeout, allow_redirects=False)
-                    response, manual_chain = self._follow_redirects(
-                        response, "GET", {"timeout": self.timeout}
-                    )
-                    redirect_chain.append(f"{url} -> {fallback}")
-                    redirect_chain.extend(manual_chain)
-                    final_url = fallback
-                except Exception as e:
-                    raise HttpError(f"Failed to probe target: {url} - {e}") from e
-            else:
-                raise
+        except (HttpError, requests.exceptions.RequestException) as primary_err:
+            # H4: fallback is OFF by default. The previous behaviour silently
+            # downgraded auth headers, cookies, and credentials onto plain
+            # HTTP. Operators must now opt in.
+            if not url.startswith("https://"):
+                # Not an HTTPS probe — nothing to fall back to.
+                if isinstance(primary_err, HttpError):
+                    raise
+                raise HttpError(f"Failed to probe target: {url} - {primary_err}") from primary_err
+            if not self.allow_http_fallback:
+                raise HttpError(
+                    f"HTTPS probe failed for {url}: {primary_err}. "
+                    "Plain-HTTP fallback is disabled by default; re-run with "
+                    "allow_http_fallback=True (CLI: --allow-http-fallback) "
+                    "to override at your own risk."
+                ) from primary_err
+
+            fallback = url.replace("https://", "http://", 1)
+            log.warning(
+                "HTTPS probe failed; falling back to HTTP — auth material "
+                "will travel in plaintext. original=%s fallback=%s err=%s",
+                url,
+                fallback,
+                primary_err,
+            )
+            self._check_scope(fallback)
+            self.rate_limiter.acquire()
+            try:
+                response = self.session.get(fallback, timeout=self.timeout, allow_redirects=False)
+                response, manual_chain = self._follow_redirects(response, "GET", {"timeout": self.timeout})
+                redirect_chain.append(f"{url} -> {fallback}")
+                redirect_chain.extend(manual_chain)
+                final_url = fallback
+                http_fallback_attempted = True
+            except (HttpError, requests.exceptions.RequestException) as e:
+                raise HttpError(f"Failed to probe target: {url} - {e}") from e
 
         final_url = response.url
 
@@ -530,6 +568,7 @@ class HTTPClient:
             request_id=request_id,
             redirect_chain=redirect_chain,
             duration_ms=(time.monotonic() - start_time) * 1000,
+            http_fallback_attempted=http_fallback_attempted,
         )
 
     def close(self) -> None:
