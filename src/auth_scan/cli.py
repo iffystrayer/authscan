@@ -181,6 +181,15 @@ class AuthScanCommand(click.Command):
     help="Custom CA bundle for TLS verification.",
 )
 @click.option(
+    "--allow-http-fallback",
+    is_flag=True,
+    help=(
+        "If HTTPS probe fails, retry over plain HTTP. DANGEROUS — auth "
+        "headers, cookies, and credentials travel in plaintext. Disabled "
+        "by default."
+    ),
+)
+@click.option(
     "--output-dir",
     type=click.Path(file_okay=False),
     default="./scan-results",
@@ -257,6 +266,7 @@ def main(
     resume_scan_id: str | None,
     no_verify: bool,
     ca_bundle: str | None,
+    allow_http_fallback: bool,
     output_dir: str,
     output_file: str | None,
     init_config: bool,
@@ -335,6 +345,8 @@ def main(
             config.no_verify = True
         if ca_bundle is not None:
             config.ca_bundle = ca_bundle
+        if allow_http_fallback:
+            config.allow_http_fallback = True
         if cookies_dict:
             config.cookies.update(cookies_dict)
         if headers_dict:

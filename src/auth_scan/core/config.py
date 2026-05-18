@@ -114,6 +114,10 @@ class ScanConfig:
     cookies: dict[str, str] = field(default_factory=dict)
     no_verify: bool = False
     ca_bundle: str = ""
+    # When True, the probe falls back from HTTPS to plain HTTP if HTTPS
+    # fails (legacy auth-scan behaviour). Off by default so credentials
+    # never silently travel in plaintext. See PR-3 / H4.
+    allow_http_fallback: bool = False
 
     # Authentication
     auth_type: str = ""  # bearer, basic, form, cookie
@@ -310,6 +314,7 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
         "proxy",
         "no_verify",
         "ca_bundle",
+        "allow_http_fallback",
         "no_redact",
         "no_color",
         "verbose",

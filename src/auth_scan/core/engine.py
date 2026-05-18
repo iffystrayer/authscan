@@ -149,6 +149,7 @@ class ScanEngine:
             user_agent=self.config.user_agent,
             cookies=self.config.cookies,
             headers=self.config.headers,
+            allow_http_fallback=getattr(self.config, "allow_http_fallback", False),
         )
         return self.http
 
@@ -306,6 +307,30 @@ class ScanEngine:
                         cwe_id="CWE-319",
                         module_name="probe",
                         tags=["ssl", "no-tls"],
+                    )
+                )
+
+            # H4: surface scanner-side HTTPS->HTTP fallback as a finding so it
+            # isn't silent. This is distinct from the server-driven redirect
+            # case above — the *scanner* fell back because HTTPS failed.
+            if getattr(probe, "http_fallback_attempted", False):
+                self.report.add_finding(
+                    Finding(
+                        title="Scanner HTTPS-to-HTTP Fallback",
+                        description=(
+                            "HTTPS probe failed; the scanner fell back to plain HTTP "
+                            "(allow_http_fallback was enabled). All authentication "
+                            "material captured by this scan travelled in plaintext."
+                        ),
+                        severity=Severity.MEDIUM,
+                        evidence={"redirect_chain": probe.redirect_chain},
+                        remediation=(
+                            "Investigate the HTTPS failure (TLS cert, SNI, proxy). "
+                            "Avoid using --allow-http-fallback in production engagements."
+                        ),
+                        cwe_id="CWE-319",
+                        module_name="probe",
+                        tags=["ssl", "downgrade", "scanner-fallback"],
                     )
                 )
 
