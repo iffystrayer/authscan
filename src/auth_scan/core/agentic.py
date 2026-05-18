@@ -1,4 +1,5 @@
 """OODA (Observe-Orient-Decide-Act) decision engine for agentic scanning."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -81,12 +82,14 @@ class OODAEngine:
                 evidence = finding.evidence or {}
                 url = evidence.get("path", evidence.get("url", ""))
                 if url and url not in self.model.endpoints:
-                    self.model.add_endpoint(AuthEndpoint(
-                        url=url,
-                        method=evidence.get("method", "GET"),
-                        status=evidence.get("status", 0),
-                        auth_mechanism="none",
-                    ))
+                    self.model.add_endpoint(
+                        AuthEndpoint(
+                            url=url,
+                            method=evidence.get("method", "GET"),
+                            status=evidence.get("status", 0),
+                            auth_mechanism="none",
+                        )
+                    )
 
             # Login form found
             if "forms" in tags or "login" in finding.title.lower():
@@ -94,13 +97,15 @@ class OODAEngine:
                 url = evidence.get("form_url", evidence.get("path", ""))
                 if url and url not in self.model.endpoints:
                     fields = evidence.get("form_fields", evidence.get("input_names", []))
-                    self.model.add_endpoint(AuthEndpoint(
-                        url=url,
-                        method="POST",
-                        auth_mechanism="form",
-                        form_fields=list(fields) if fields else ["username", "password"],
-                        status=200,
-                    ))
+                    self.model.add_endpoint(
+                        AuthEndpoint(
+                            url=url,
+                            method="POST",
+                            auth_mechanism="form",
+                            form_fields=list(fields) if fields else ["username", "password"],
+                            status=200,
+                        )
+                    )
                     self.model.auth_mechanisms.add("form")
 
             # JWT tokens
@@ -126,23 +131,27 @@ class OODAEngine:
             # API keys
             if "api-key" in tags or "api_key" in tags:
                 evidence = finding.evidence or {}
-                self.model.add_token(ModelToken(
-                    token_type="apikey",
-                    location=evidence.get("location", "source"),
-                    weaknesses=["exposed_in_source"],
-                ))
+                self.model.add_token(
+                    ModelToken(
+                        token_type="apikey",
+                        location=evidence.get("location", "source"),
+                        weaknesses=["exposed_in_source"],
+                    )
+                )
 
             # Session / cookies
             if "session" in tags or "cookies" in tags or "cookie" in tags:
                 evidence = finding.evidence or {}
                 cookie_name = evidence.get("cookie_name", evidence.get("name", "unknown"))
                 flag = evidence.get("flag", {})
-                self.model.add_session(ModelSession(
-                    cookie_name=cookie_name,
-                    flags=flag if isinstance(flag, dict) else {},
-                    fixation_vulnerable=("fixation" in finding.title.lower()),
-                    invalidation_works=not ("invalidation" in finding.title.lower()),
-                ))
+                self.model.add_session(
+                    ModelSession(
+                        cookie_name=cookie_name,
+                        flags=flag if isinstance(flag, dict) else {},
+                        fixation_vulnerable=("fixation" in finding.title.lower()),
+                        invalidation_works="invalidation" not in finding.title.lower(),
+                    )
+                )
 
             # OAuth
             if "oauth" in tags or "oidc" in tags:
@@ -150,11 +159,13 @@ class OODAEngine:
                 evidence = finding.evidence or {}
                 auth_url = evidence.get("authorization_url", "")
                 if auth_url and auth_url not in self.model.endpoints:
-                    self.model.add_endpoint(AuthEndpoint(
-                        url=auth_url,
-                        method="GET",
-                        auth_mechanism="oauth",
-                    ))
+                    self.model.add_endpoint(
+                        AuthEndpoint(
+                            url=auth_url,
+                            method="GET",
+                            auth_mechanism="oauth",
+                        )
+                    )
 
             # MFA detected
             if "mfa" in tags:
@@ -174,11 +185,13 @@ class OODAEngine:
                     username = evidence.get("username", "")
                     password = evidence.get("password", "")
                     if username:
-                        self._credentials_found.append({
-                            "username": username,
-                            "password": password if "REDACTED" not in str(password) else "",
-                            "source": finding.module_name,
-                        })
+                        self._credentials_found.append(
+                            {
+                                "username": username,
+                                "password": password if "REDACTED" not in str(password) else "",
+                                "source": finding.module_name,
+                            }
+                        )
 
         changes["new_endpoints"] = len(self.model.endpoints) - prev_endpoints
         changes["new_tokens"] = len(self.model.tokens) - prev_tokens
@@ -187,14 +200,16 @@ class OODAEngine:
         changes["credentials_found"] = len(self._credentials_found)
 
         # Record observation
-        self.decision_trail.append(DecisionRecord(
-            cycle=self.cycle,
-            phase="observe",
-            action="collect_module_output",
-            reasoning=f"Extracted {changes['new_endpoints']} endpoints, "
-                       f"{changes['new_tokens']} tokens, "
-                       f"{changes['new_sessions']} sessions",
-        ))
+        self.decision_trail.append(
+            DecisionRecord(
+                cycle=self.cycle,
+                phase="observe",
+                action="collect_module_output",
+                reasoning=f"Extracted {changes['new_endpoints']} endpoints, "
+                f"{changes['new_tokens']} tokens, "
+                f"{changes['new_sessions']} sessions",
+            )
+        )
 
         return changes
 
@@ -234,17 +249,21 @@ class OODAEngine:
         chaining_hints: list[str] = []
         if self._credentials_found and self.model.sessions:
             chaining_hints.append("credentials + sessions → privilege escalation check")
-        if any(t.token_type == "jwt" for t in self.model.tokens) and any(t.is_cracked for t in self.model.tokens):
+        if any(t.token_type == "jwt" for t in self.model.tokens) and any(
+            t.is_cracked for t in self.model.tokens
+        ):
             chaining_hints.append("cracked_jwt + other_findings → token_forgery")
 
-        self.decision_trail.append(DecisionRecord(
-            cycle=self.cycle,
-            phase="orient",
-            action="update_model",
-            reasoning=f"Confidence {self.model.confidence:.2f} ({'+' if delta >= 0 else ''}{delta:.2f}). "
-                       f"Gaps: {gaps[:3] if gaps else ['none']}",
-            confidence_change=delta,
-        ))
+        self.decision_trail.append(
+            DecisionRecord(
+                cycle=self.cycle,
+                phase="orient",
+                action="update_model",
+                reasoning=f"Confidence {self.model.confidence:.2f} ({'+' if delta >= 0 else ''}{delta:.2f}). "
+                f"Gaps: {gaps[:3] if gaps else ['none']}",
+                confidence_change=delta,
+            )
+        )
 
         return {
             "confidence": self.model.confidence,
@@ -278,7 +297,11 @@ class OODAEngine:
                     "action": "run_module",
                     "module": "session",
                     "reason": f"Valid credentials for {cred['username']} found — re-running session tests with auth cookies.",
-                    "params": {"cookies": {self.model.sessions[0].cookie_name: "valid"} if self.model.sessions else {}},
+                    "params": {
+                        "cookies": {self.model.sessions[0].cookie_name: "valid"}
+                        if self.model.sessions
+                        else {}
+                    },
                 }
             if "jwt" in module_map and "jwt" not in self._modules_run:
                 self._modules_run.add("jwt")
@@ -294,20 +317,24 @@ class OODAEngine:
 
         # Rule 2: HS256 JWT found, not cracked
         jwt_tokens = [t for t in self.model.tokens if t.token_type == "jwt"]
-        uncracked_hs = [t for t in jwt_tokens
-                        if t.algorithm and t.algorithm.upper().startswith("HS")
-                        and not t.is_cracked]
+        uncracked_hs = [
+            t for t in jwt_tokens if t.algorithm and t.algorithm.upper().startswith("HS") and not t.is_cracked
+        ]
         if uncracked_hs and "jwt" in module_map:
             self._modules_run.add("jwt")
             return {
                 "action": "run_module",
                 "module": "jwt",
-                "reason": f"HS256 JWT found but not yet cracked — running JWT analyzer with cracking priority.",
+                "reason": "HS256 JWT found but not yet cracked — running JWT analyzer with cracking priority.",
                 "params": {"jwt_crack": True},
             }
 
         # Rule 3: OAuth endpoints found
-        if "oauth" in self.model.auth_mechanisms and "oauth" in module_map and "oauth" not in self._modules_run:
+        if (
+            "oauth" in self.model.auth_mechanisms
+            and "oauth" in module_map
+            and "oauth" not in self._modules_run
+        ):
             self._modules_run.add("oauth")
             return {
                 "action": "run_module",
@@ -317,7 +344,11 @@ class OODAEngine:
             }
 
         # Rule 4: API keys found
-        if any(t.token_type == "apikey" for t in self.model.tokens) and "api_key" in module_map and "api_key" not in self._modules_run:
+        if (
+            any(t.token_type == "apikey" for t in self.model.tokens)
+            and "api_key" in module_map
+            and "api_key" not in self._modules_run
+        ):
             self._modules_run.add("api_key")
             return {
                 "action": "run_module",
@@ -337,7 +368,11 @@ class OODAEngine:
             }
 
         # Rule 6: WebSocket endpoints
-        if any(ep.auth_mechanism == "ws" for ep in self.model.endpoints.values()) and "websocket" in module_map and "websocket" not in self._modules_run:
+        if (
+            any(ep.auth_mechanism == "ws" for ep in self.model.endpoints.values())
+            and "websocket" in module_map
+            and "websocket" not in self._modules_run
+        ):
             self._modules_run.add("websocket")
             return {
                 "action": "run_module",
@@ -350,7 +385,13 @@ class OODAEngine:
         for mech in sorted(self.model.auth_mechanisms):
             if mech not in self.model._mechanisms_tested:
                 self.model.mark_mechanism_tested(mech)
-                module_name = {"form": "brute", "oauth": "oauth", "jwt": "jwt", "mfa": "mfa", "ws": "websocket"}.get(mech)
+                module_name = {
+                    "form": "brute",
+                    "oauth": "oauth",
+                    "jwt": "jwt",
+                    "mfa": "mfa",
+                    "ws": "websocket",
+                }.get(mech)
                 if module_name and module_name in module_map and module_name not in self._modules_run:
                     self._modules_run.add(module_name)
                     return {
@@ -381,19 +422,24 @@ class OODAEngine:
     # ── Act ──────────────────────────────────────────────────────
 
     def act(
-        self, decision: dict[str, Any], module_map: dict[str, Any], report: ScanReport,
+        self,
+        decision: dict[str, Any],
+        module_map: dict[str, Any],
+        report: ScanReport,
     ) -> ModuleResult | None:
         """Execute the decided action."""
         action = decision.get("action", "")
         module_name = decision.get("module", "")
         reason = decision.get("reason", "")
 
-        self.decision_trail.append(DecisionRecord(
-            cycle=self.cycle,
-            phase="act",
-            action=f"{action}:{module_name}" if module_name else action,
-            reasoning=reason,
-        ))
+        self.decision_trail.append(
+            DecisionRecord(
+                cycle=self.cycle,
+                phase="act",
+                action=f"{action}:{module_name}" if module_name else action,
+                reasoning=reason,
+            )
+        )
 
         if action == "conclude":
             return None
@@ -424,7 +470,10 @@ class OODAEngine:
     # ── Main Loop ────────────────────────────────────────────────
 
     def run_loop(
-        self, module_map: dict[str, Any], report: ScanReport, max_cycles: int = 10,
+        self,
+        module_map: dict[str, Any],
+        report: ScanReport,
+        max_cycles: int = 10,
     ) -> ScanReport:
         """Run the OODA loop until conclusion or max_cycles reached."""
         self.cycle = 0
@@ -446,52 +495,69 @@ class OODAEngine:
 
             # Check termination conditions
             if self.model.confidence >= threshold:
-                self.decision_trail.append(DecisionRecord(
-                    cycle=self.cycle,
-                    phase="decide",
-                    action="conclude",
-                    reasoning=f"Confidence {self.model.confidence:.2f} >= threshold {threshold}.",
-                ))
+                self.decision_trail.append(
+                    DecisionRecord(
+                        cycle=self.cycle,
+                        phase="decide",
+                        action="conclude",
+                        reasoning=f"Confidence {self.model.confidence:.2f} >= threshold {threshold}.",
+                    )
+                )
                 break
 
-            if not assessment["gaps"] and self._modules_run >= {"jwt", "session", "brute", "oauth", "mfa", "api_key"}:
-                self.decision_trail.append(DecisionRecord(
-                    cycle=self.cycle,
-                    phase="decide",
-                    action="conclude",
-                    reasoning="No gaps remaining and core modules exhausted.",
-                ))
+            if not assessment["gaps"] and self._modules_run >= {
+                "jwt",
+                "session",
+                "brute",
+                "oauth",
+                "mfa",
+                "api_key",
+            }:
+                self.decision_trail.append(
+                    DecisionRecord(
+                        cycle=self.cycle,
+                        phase="decide",
+                        action="conclude",
+                        reasoning="No gaps remaining and core modules exhausted.",
+                    )
+                )
                 break
 
             # Decide
             decision = self.decide(module_map, report)
-            self.decision_trail.append(DecisionRecord(
-                cycle=self.cycle,
-                phase="decide",
-                action=f"{decision.get('action', '')}:{decision.get('module', '')}",
-                reasoning=decision.get("reason", ""),
-            ))
+            self.decision_trail.append(
+                DecisionRecord(
+                    cycle=self.cycle,
+                    phase="decide",
+                    action=f"{decision.get('action', '')}:{decision.get('module', '')}",
+                    reasoning=decision.get("reason", ""),
+                )
+            )
 
             if decision["action"] == "conclude":
                 # Check if chain synthesis might find more
                 if self.cycle < max_cycles:
-                    self.decision_trail.append(DecisionRecord(
-                        cycle=self.cycle,
-                        phase="decide",
-                        action="synthesize_chains",
-                        reasoning="Concluded — running chain synthesis.",
-                    ))
+                    self.decision_trail.append(
+                        DecisionRecord(
+                            cycle=self.cycle,
+                            phase="decide",
+                            action="synthesize_chains",
+                            reasoning="Concluded — running chain synthesis.",
+                        )
+                    )
                 break
 
             # Act
             result = self.act(decision, module_map, report)
             if result is None:
-                self.decision_trail.append(DecisionRecord(
-                    cycle=self.cycle,
-                    phase="act",
-                    action="no_op",
-                    reasoning="Act returned None.",
-                ))
+                self.decision_trail.append(
+                    DecisionRecord(
+                        cycle=self.cycle,
+                        phase="act",
+                        action="no_op",
+                        reasoning="Act returned None.",
+                    )
+                )
                 continue
 
             # Merge findings into report
@@ -545,7 +611,13 @@ class OODAEngine:
             return [f for f in report.findings if tag in (f.tags or [])]
 
         def _severity_upgrade(s1: Severity, s2: Severity) -> Severity:
-            levels = [Severity.INFO, Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
+            levels = [
+                Severity.INFO,
+                Severity.LOW,
+                Severity.MEDIUM,
+                Severity.HIGH,
+                Severity.CRITICAL,
+            ]
             idx = max(levels.index(s1), levels.index(s2))
             return levels[min(idx + 1, len(levels) - 1)]  # upgrade by 1, max CRITICAL
 
@@ -554,92 +626,128 @@ class OODAEngine:
         weak_pass = _tagged("default-credentials")
         if user_enum and weak_pass:
             children = [user_enum[0].id, weak_pass[0].id]
-            chains.append(Finding(
-                title="Exploit Chain: Account Takeover via Enumeration + Weak Password",
-                description=(
-                    "Low-severity user enumeration combined with weak/default credentials "
-                    "creates a viable account takeover path. An attacker can enumerate valid "
-                    "usernames, then authenticate using known weak passwords."
-                ),
-                severity=_severity_upgrade(user_enum[0].severity, weak_pass[0].severity),
-                evidence={"chained_findings": children, "attack_path": "user_enumeration → credential_spraying → account_takeover"},
-                remediation="Fix both user enumeration (use generic error messages) and enforce strong password policy.",
-                cwe_id="CWE-287",
-                module_name="agentic_engine",
-                confidence=min(user_enum[0].confidence, weak_pass[0].confidence) * 0.9,
-                chain_parent=None,
-                chain_children=children,
-                tags=["chain", "account-takeover", "exploit-chain"],
-            ))
+            chains.append(
+                Finding(
+                    title="Exploit Chain: Account Takeover via Enumeration + Weak Password",
+                    description=(
+                        "Low-severity user enumeration combined with weak/default credentials "
+                        "creates a viable account takeover path. An attacker can enumerate valid "
+                        "usernames, then authenticate using known weak passwords."
+                    ),
+                    severity=_severity_upgrade(user_enum[0].severity, weak_pass[0].severity),
+                    evidence={
+                        "chained_findings": children,
+                        "attack_path": "user_enumeration → credential_spraying → account_takeover",
+                    },
+                    remediation="Fix both user enumeration (use generic error messages) and enforce strong password policy.",
+                    cwe_id="CWE-287",
+                    module_name="agentic_engine",
+                    confidence=min(user_enum[0].confidence, weak_pass[0].confidence) * 0.9,
+                    chain_parent=None,
+                    chain_children=children,
+                    tags=["chain", "account-takeover", "exploit-chain"],
+                )
+            )
 
         # Chain 2: jwt_hs256 + cracked_secret → token_forgery
-        jwt_cracked = [f for f in report.findings if "cracking" in (f.tags or []) and f.severity == Severity.CRITICAL]
-        jwt_sensitive = [f for f in report.findings if "sensitive-data" in (f.tags or []) and "jwt" in (f.tags or [])]
+        jwt_cracked = [
+            f for f in report.findings if "cracking" in (f.tags or []) and f.severity == Severity.CRITICAL
+        ]
+        jwt_sensitive = [
+            f for f in report.findings if "sensitive-data" in (f.tags or []) and "jwt" in (f.tags or [])
+        ]
         if jwt_cracked and jwt_sensitive:
             children = [jwt_cracked[0].id, jwt_sensitive[0].id]
-            chains.append(Finding(
-                title="Exploit Chain: JWT Token Forgery via Cracked Secret + Sensitive Payload",
-                description=(
-                    "JWT HMAC secret was cracked, and the token contains sensitive data. "
-                    "An attacker can forge arbitrary tokens with escalated privileges or "
-                    "impersonate any user."
-                ),
-                severity=Severity.CRITICAL,
-                evidence={"chained_findings": children, "attack_path": "crack_hmac_secret → forge_jwt_with_admin_role → full_access"},
-                remediation="Rotate JWT secret immediately and use RS256/ES256. Remove sensitive data from JWT payloads.",
-                cwe_id="CWE-347",
-                module_name="agentic_engine",
-                confidence=min(jwt_cracked[0].confidence, jwt_sensitive[0].confidence) * 0.9,
-                chain_parent=None,
-                chain_children=children,
-                tags=["chain", "token-forgery", "exploit-chain", "critical"],
-            ))
+            chains.append(
+                Finding(
+                    title="Exploit Chain: JWT Token Forgery via Cracked Secret + Sensitive Payload",
+                    description=(
+                        "JWT HMAC secret was cracked, and the token contains sensitive data. "
+                        "An attacker can forge arbitrary tokens with escalated privileges or "
+                        "impersonate any user."
+                    ),
+                    severity=Severity.CRITICAL,
+                    evidence={
+                        "chained_findings": children,
+                        "attack_path": "crack_hmac_secret → forge_jwt_with_admin_role → full_access",
+                    },
+                    remediation="Rotate JWT secret immediately and use RS256/ES256. Remove sensitive data from JWT payloads.",
+                    cwe_id="CWE-347",
+                    module_name="agentic_engine",
+                    confidence=min(jwt_cracked[0].confidence, jwt_sensitive[0].confidence) * 0.9,
+                    chain_parent=None,
+                    chain_children=children,
+                    tags=["chain", "token-forgery", "exploit-chain", "critical"],
+                )
+            )
 
         # Chain 3: missing_state + open_redirect → oauth_csrf
-        oauth_redirect = [f for f in report.findings if "open-redirect" in (f.tags or []) and "oauth" in (f.tags or [])]
-        oauth_csrf_find = [f for f in report.findings if "csrf" in (f.tags or []) and "oauth" in (f.tags or [])]
+        oauth_redirect = [
+            f for f in report.findings if "open-redirect" in (f.tags or []) and "oauth" in (f.tags or [])
+        ]
+        oauth_csrf_find = [
+            f for f in report.findings if "csrf" in (f.tags or []) and "oauth" in (f.tags or [])
+        ]
         if oauth_redirect and oauth_csrf_find:
             children = [oauth_redirect[0].id, oauth_csrf_find[0].id]
-            chains.append(Finding(
-                title="Exploit Chain: OAuth CSRF via Missing State + Open Redirect",
-                description=(
-                    "Missing state parameter combined with open redirect in the OAuth flow "
-                    "enables full CSRF attacks during authorization. Attackers can steal "
-                    "authorization codes and access victim accounts."
-                ),
-                severity=Severity.CRITICAL,
-                evidence={"chained_findings": children, "attack_path": "csrf_attack → victim_authorizes → code_redirected_to_attacker → account_takeover"},
-                remediation="Add state parameter to all OAuth requests and strictly validate redirect_uri against a whitelist.",
-                cwe_id="CWE-352",
-                module_name="agentic_engine",
-                confidence=min(oauth_redirect[0].confidence, oauth_csrf_find[0].confidence) * 0.9,
-                chain_parent=None,
-                chain_children=children,
-                tags=["chain", "oauth-csrf", "exploit-chain", "critical"],
-            ))
+            chains.append(
+                Finding(
+                    title="Exploit Chain: OAuth CSRF via Missing State + Open Redirect",
+                    description=(
+                        "Missing state parameter combined with open redirect in the OAuth flow "
+                        "enables full CSRF attacks during authorization. Attackers can steal "
+                        "authorization codes and access victim accounts."
+                    ),
+                    severity=Severity.CRITICAL,
+                    evidence={
+                        "chained_findings": children,
+                        "attack_path": "csrf_attack → victim_authorizes → code_redirected_to_attacker → account_takeover",
+                    },
+                    remediation="Add state parameter to all OAuth requests and strictly validate redirect_uri against a whitelist.",
+                    cwe_id="CWE-352",
+                    module_name="agentic_engine",
+                    confidence=min(oauth_redirect[0].confidence, oauth_csrf_find[0].confidence) * 0.9,
+                    chain_parent=None,
+                    chain_children=children,
+                    tags=["chain", "oauth-csrf", "exploit-chain", "critical"],
+                )
+            )
 
         # Chain 4: missing_httponly + any auth finding → session_hijacking
-        missing_httponly = [f for f in report.findings if "HttpOnly" in (f.evidence or {}).get("cookie_name", "") or "HttpOnly" in f.title]
-        auth_findings = [f for f in report.findings if f.severity in (Severity.HIGH, Severity.CRITICAL) and f.module_name not in ("agentic_engine",)]
+        missing_httponly = [
+            f
+            for f in report.findings
+            if "HttpOnly" in (f.evidence or {}).get("cookie_name", "") or "HttpOnly" in f.title
+        ]
+        auth_findings = [
+            f
+            for f in report.findings
+            if f.severity in (Severity.HIGH, Severity.CRITICAL) and f.module_name not in ("agentic_engine",)
+        ]
         if missing_httponly and auth_findings:
             children = [missing_httponly[0].id, auth_findings[0].id]
-            chains.append(Finding(
-                title="Exploit Chain: Session Hijacking via Missing HttpOnly + Auth Vulnerability",
-                description=(
-                    "Missing HttpOnly flag on cookies combined with other authentication "
-                    "weaknesses enables session hijacking via XSS or other injection vectors. "
-                    "An attacker can steal session cookies and impersonate users."
-                ),
-                severity=_severity_upgrade(missing_httponly[0].severity, auth_findings[0].severity),
-                evidence={"chained_findings": children, "attack_path": "xss_or_injection → steal_session_cookie → session_hijacking"},
-                remediation="Set HttpOnly, Secure, and SameSite=Strict on all session cookies.",
-                cwe_id="CWE-1004",
-                module_name="agentic_engine",
-                confidence=min(missing_httponly[0].confidence, auth_findings[0].confidence) * 0.85,
-                chain_parent=None,
-                chain_children=children,
-                tags=["chain", "session-hijacking", "exploit-chain"],
-            ))
+            chains.append(
+                Finding(
+                    title="Exploit Chain: Session Hijacking via Missing HttpOnly + Auth Vulnerability",
+                    description=(
+                        "Missing HttpOnly flag on cookies combined with other authentication "
+                        "weaknesses enables session hijacking via XSS or other injection vectors. "
+                        "An attacker can steal session cookies and impersonate users."
+                    ),
+                    severity=_severity_upgrade(missing_httponly[0].severity, auth_findings[0].severity),
+                    evidence={
+                        "chained_findings": children,
+                        "attack_path": "xss_or_injection → steal_session_cookie → session_hijacking",
+                    },
+                    remediation="Set HttpOnly, Secure, and SameSite=Strict on all session cookies.",
+                    cwe_id="CWE-1004",
+                    module_name="agentic_engine",
+                    confidence=min(missing_httponly[0].confidence, auth_findings[0].confidence) * 0.85,
+                    chain_parent=None,
+                    chain_children=children,
+                    tags=["chain", "session-hijacking", "exploit-chain"],
+                )
+            )
 
         # Chain 5: apikey_exposure + auth_weakness → privilege_escalation
         api_keys = _tagged("api-key")
@@ -647,22 +755,28 @@ class OODAEngine:
         high_findings = [f for f in report.findings if f.severity in (Severity.HIGH, Severity.CRITICAL)]
         if (api_keys or api_secrets) and high_findings:
             children = [(api_keys + api_secrets)[0].id, high_findings[0].id]
-            chains.append(Finding(
-                title="Exploit Chain: Privilege Escalation via Exposed Keys + Auth Weakness",
-                description=(
-                    "API keys/secrets found in client-side code combined with other "
-                    "authentication weaknesses create a path to privilege escalation. "
-                    "Exposed keys can be used to access backend services directly."
-                ),
-                severity=Severity.CRITICAL,
-                evidence={"chained_findings": children, "attack_path": "extract_api_key → access_admin_apis → privilege_escalation"},
-                remediation="Remove all secrets from client-side code. Use server-side API proxies.",
-                cwe_id="CWE-798",
-                module_name="agentic_engine",
-                confidence=min((api_keys + api_secrets)[0].confidence, high_findings[0].confidence) * 0.85,
-                chain_parent=None,
-                chain_children=children,
-                tags=["chain", "privilege-escalation", "exploit-chain", "critical"],
-            ))
+            chains.append(
+                Finding(
+                    title="Exploit Chain: Privilege Escalation via Exposed Keys + Auth Weakness",
+                    description=(
+                        "API keys/secrets found in client-side code combined with other "
+                        "authentication weaknesses create a path to privilege escalation. "
+                        "Exposed keys can be used to access backend services directly."
+                    ),
+                    severity=Severity.CRITICAL,
+                    evidence={
+                        "chained_findings": children,
+                        "attack_path": "extract_api_key → access_admin_apis → privilege_escalation",
+                    },
+                    remediation="Remove all secrets from client-side code. Use server-side API proxies.",
+                    cwe_id="CWE-798",
+                    module_name="agentic_engine",
+                    confidence=min((api_keys + api_secrets)[0].confidence, high_findings[0].confidence)
+                    * 0.85,
+                    chain_parent=None,
+                    chain_children=children,
+                    tags=["chain", "privilege-escalation", "exploit-chain", "critical"],
+                )
+            )
 
         return chains

@@ -1,4 +1,5 @@
 """Tests for AttackSurfaceModel."""
+
 from __future__ import annotations
 
 from auth_scan.core.attack_surface import (
@@ -31,7 +32,9 @@ class TestAttackSurfaceModel:
     def test_add_duplicate_endpoint_merges(self) -> None:
         model = AttackSurfaceModel(target="https://example.com")
         model.add_endpoint(AuthEndpoint(url="/api", method="GET", auth_mechanism=None))
-        model.add_endpoint(AuthEndpoint(url="/api", method="POST", auth_mechanism="jwt", form_fields=["token"]))
+        model.add_endpoint(
+            AuthEndpoint(url="/api", method="POST", auth_mechanism="jwt", form_fields=["token"])
+        )
         assert len(model.endpoints) == 1
         assert model.endpoints["/api"].auth_mechanism == "jwt"
         assert "token" in model.endpoints["/api"].form_fields
@@ -95,7 +98,9 @@ class TestAttackSurfaceModel:
 
     def test_get_high_value_targets(self) -> None:
         model = AttackSurfaceModel(target="https://example.com")
-        model.add_endpoint(AuthEndpoint(url="/login", auth_mechanism="form", status=200, form_fields=["u", "p"]))
+        model.add_endpoint(
+            AuthEndpoint(url="/login", auth_mechanism="form", status=200, form_fields=["u", "p"])
+        )
         model.add_endpoint(AuthEndpoint(url="/robots.txt", auth_mechanism=None, status=404))
         targets = model.get_high_value_targets()
         assert len(targets) >= 1

@@ -6,6 +6,7 @@ against a fixed set of secrets that must never appear in default
 (redacted) output, and must appear under ``--no-redact`` only where the
 operator explicitly opted in.
 """
+
 from __future__ import annotations
 
 import json
@@ -69,42 +70,50 @@ def leaky_report() -> ScanReport:
     """
     report = ScanReport(target="https://example.com", effective_target="https://example.com")
     # Metadata leaks (the SEC-1 vector — engine writes raw probe artifacts here).
-    report.metadata.update({
-        "probe_headers": {"Set-Cookie": SET_COOKIE_HEADER, "Authorization": f"Bearer {JWT}"},
-        "probe_cookies": {"sid": SESSION_COOKIE.split("=", 1)[1]},
-        "probe_body": f"<html>token={JWT} aws={AWS_KEY}</html>",
-        "probe_forms": [{"action": "/login", "inputs": [{"name": "csrf_token", "value": "abc"}]}],
-    })
+    report.metadata.update(
+        {
+            "probe_headers": {"Set-Cookie": SET_COOKIE_HEADER, "Authorization": f"Bearer {JWT}"},
+            "probe_cookies": {"sid": SESSION_COOKIE.split("=", 1)[1]},
+            "probe_body": f"<html>token={JWT} aws={AWS_KEY}</html>",
+            "probe_forms": [{"action": "/login", "inputs": [{"name": "csrf_token", "value": "abc"}]}],
+        }
+    )
     # The brute-force module path (C1). Description uses [REDACTED] like
     # the fixed module now produces; evidence still carries the secret so
     # we can verify the serializer scrubs it.
-    report.add_finding(Finding(
-        title="Weak/Default Credentials Accepted",
-        description="Login succeeded with credentials: admin:[REDACTED]",
-        severity=Severity.CRITICAL,
-        evidence={
-            "username": "admin",
-            "password": PASSWORD,
-            "form_url": "https://example.com/login",
-        },
-        module_name="brute",
-    ))
+    report.add_finding(
+        Finding(
+            title="Weak/Default Credentials Accepted",
+            description="Login succeeded with credentials: admin:[REDACTED]",
+            severity=Severity.CRITICAL,
+            evidence={
+                "username": "admin",
+                "password": PASSWORD,
+                "form_url": "https://example.com/login",
+            },
+            module_name="brute",
+        )
+    )
     # Evidence with a JWT shape under a non-obvious key name.
-    report.add_finding(Finding(
-        title="JWT Found in Response",
-        description=f"Bearer leak: {JWT}",  # value-shape scrubbed
-        severity=Severity.HIGH,
-        evidence={"sample": f"Authorization: Bearer {JWT}"},
-        module_name="jwt",
-    ))
+    report.add_finding(
+        Finding(
+            title="JWT Found in Response",
+            description=f"Bearer leak: {JWT}",  # value-shape scrubbed
+            severity=Severity.HIGH,
+            evidence={"sample": f"Authorization: Bearer {JWT}"},
+            module_name="jwt",
+        )
+    )
     # Evidence with value-shape secrets that are not in REDACT_KEYS at all.
-    report.add_finding(Finding(
-        title="API Keys in JS Bundle",
-        description=f"AWS={AWS_KEY} GH={GH_TOKEN} Slack={SLACK_TOKEN}",
-        severity=Severity.HIGH,
-        evidence={"snippet": f"const k = '{AWS_KEY}'; const g = '{GH_TOKEN}';"},
-        module_name="api_key",
-    ))
+    report.add_finding(
+        Finding(
+            title="API Keys in JS Bundle",
+            description=f"AWS={AWS_KEY} GH={GH_TOKEN} Slack={SLACK_TOKEN}",
+            severity=Severity.HIGH,
+            evidence={"snippet": f"const k = '{AWS_KEY}'; const g = '{GH_TOKEN}';"},
+            module_name="api_key",
+        )
+    )
     return report
 
 
@@ -112,9 +121,7 @@ _REPORTERS = [JsonReporter, MarkdownReporter, HtmlReporter, SarifReporter]
 
 
 @pytest.mark.parametrize("reporter_cls", _REPORTERS)
-def test_reporter_redacts_all_secrets_by_default(
-    leaky_report: ScanReport, reporter_cls: type
-) -> None:
+def test_reporter_redacts_all_secrets_by_default(leaky_report: ScanReport, reporter_cls: type) -> None:
     """No secret may appear in any reporter's redacted output."""
     reporter = reporter_cls()
     # JsonReporter takes redact kwarg directly; the rest accept it positionally on render.
@@ -125,14 +132,10 @@ def test_reporter_redacts_all_secrets_by_default(
 
     for secret in ALL_SECRETS:
         # Plain in-text occurrence
-        assert secret not in output, (
-            f"{reporter_cls.__name__} leaked secret: {secret[:12]}..."
-        )
+        assert secret not in output, f"{reporter_cls.__name__} leaked secret: {secret[:12]}..."
         # Also fail on JSON-escaped forms in HTML/Markdown evidence blocks
         escaped = json.dumps(secret).strip('"')
-        assert escaped not in output, (
-            f"{reporter_cls.__name__} leaked JSON-escaped secret: {secret[:12]}..."
-        )
+        assert escaped not in output, f"{reporter_cls.__name__} leaked JSON-escaped secret: {secret[:12]}..."
 
 
 def test_json_reporter_no_redact_emits_password(leaky_report: ScanReport) -> None:
@@ -177,12 +180,19 @@ def test_redact_dict_handles_broadened_keys() -> None:
         "private_key": "-----BEGIN-----",
         "csrf_token": "abc",
         "Custom-Auth-Header": "value",  # substring match on "auth"
-        "X-Session-Cookie": "value",     # substring match on "session" and "cookie"
+        "X-Session-Cookie": "value",  # substring match on "session" and "cookie"
         "harmless": "keep-me",
     }
     redacted = _redact_dict(sample)
-    for k in ("id_token", "client_secret", "session_id", "private_key", "csrf_token",
-              "Custom-Auth-Header", "X-Session-Cookie"):
+    for k in (
+        "id_token",
+        "client_secret",
+        "session_id",
+        "private_key",
+        "csrf_token",
+        "Custom-Auth-Header",
+        "X-Session-Cookie",
+    ):
         assert redacted[k] == "[REDACTED]", f"key {k} not redacted"
     assert redacted["harmless"] == "keep-me"
 
@@ -256,9 +266,7 @@ def test_brute_module_redacts_discovered_password_by_default() -> None:
 
 
 @pytest.mark.parametrize("reporter_cls", _REPORTERS)
-def test_reporter_no_redact_emits_secrets(
-    leaky_report: ScanReport, reporter_cls: type
-) -> None:
+def test_reporter_no_redact_emits_secrets(leaky_report: ScanReport, reporter_cls: type) -> None:
     """Belt check: --no-redact must let at least one targeted secret through.
 
     This protects against an over-zealous fix that redacts even with

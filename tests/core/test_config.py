@@ -1,4 +1,5 @@
 """Tests for configuration management."""
+
 from __future__ import annotations
 
 import os

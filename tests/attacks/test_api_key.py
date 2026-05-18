@@ -1,4 +1,5 @@
 """Tests for API key analysis module."""
+
 from __future__ import annotations
 
 from auth_scan.attacks.api_key import ApiKeyAnalyzer
@@ -26,7 +27,9 @@ class TestApiKeyAnalyzer:
     def test_stripe_key_detection(self) -> None:
         analyzer = ApiKeyAnalyzer()
         # Stripe pattern matches sk_live_ + 24 alphanumeric chars
-        prefix = chr(115)+chr(107)+chr(95)+chr(108)+chr(105)+chr(118)+chr(101)+chr(95)  # sk_live_
+        prefix = (
+            chr(115) + chr(107) + chr(95) + chr(108) + chr(105) + chr(118) + chr(101) + chr(95)
+        )  # sk_live_
         suffix = "0" * 24
         text = prefix + suffix
         findings = analyzer._scan_text(text, "page_source", None)
@@ -53,9 +56,10 @@ class TestApiKeyAnalyzer:
         report.metadata["probe_headers"] = {}
         report.metadata["probe_cookies"] = {}
 
+        import responses
+
         from auth_scan.core.config import ScanConfig
         from auth_scan.core.http_client import HTTPClient
-        import responses
 
         @responses.activate
         def run():

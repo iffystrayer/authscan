@@ -1,4 +1,5 @@
 """API key and secret detection/analysis module."""
+
 from __future__ import annotations
 
 import re
@@ -23,8 +24,16 @@ API_KEY_PATTERNS: list[tuple[str, str, str]] = [
     ("Google API Key", r"AIza[0-9A-Za-z\-_]{35}", "high"),
     ("Google OAuth Client ID", r"[0-9]+-[a-zA-Z0-9_]{32}\.apps\.googleusercontent\.com", "medium"),
     ("Slack Bot Token", r"xox[baprs]-[0-9a-zA-Z\-]+", "critical"),
-    ("Slack Webhook", r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+", "critical"),
-    ("Generic API Key Header", r"(?:api[_-]?key|apikey|x-api-key)[\"\s:=]+[\"']([^\"']{8,})[\"']", "high"),
+    (
+        "Slack Webhook",
+        r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+",
+        "critical",
+    ),
+    (
+        "Generic API Key Header",
+        r"(?:api[_-]?key|apikey|x-api-key)[\"\s:=]+[\"']([^\"']{8,})[\"']",
+        "high",
+    ),
     ("Bearer Token in Code", r"(?:bearer|token)[\"\s:=]+[\"']([a-zA-Z0-9\-_.]{20,})[\"']", "high"),
     ("Private Key (PEM)", r"-----BEGIN\s(?:RSA|EC|DSA|OPENSSH)?\s?PRIVATE KEY-----", "critical"),
     ("Password in Code", r"(?:password|passwd|pwd)[\"\s:=]+[\"']([^\"']{3,})[\"']", "high"),
@@ -32,16 +41,20 @@ API_KEY_PATTERNS: list[tuple[str, str, str]] = [
     ("Connection String", r"(?:mongodb|postgresql|mysql|sqlite|redis)://[^\"'\s]+", "critical"),
     ("SendGrid API Key", r"SG\.[a-zA-Z0-9_-]{22,}\.[a-zA-Z0-9_-]{22,}", "critical"),
     ("Twilio API Key", r"SK[0-9a-fA-F]{32}", "critical"),
-    ("Heroku API Key", r"[hH]eroku.*[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", "critical"),
+    (
+        "Heroku API Key",
+        r"[hH]eroku.*[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}",
+        "critical",
+    ),
     ("Mailgun API Key", r"key-[0-9a-zA-Z]{32}", "critical"),
     ("Generic Secret", r"(?:secret|private_key|api_secret)[\"\s:=]+[\"']([^\"']{6,})[\"']", "high"),
 ]
 
 # Locations to scan
 SCAN_LOCATIONS = [
-    "probe_body",        # Main page HTML
-    "probe_headers",     # Response headers
-    "probe_cookies",     # Response cookies
+    "probe_body",  # Main page HTML
+    "probe_headers",  # Response headers
+    "probe_cookies",  # Response cookies
 ]
 
 
@@ -102,27 +115,34 @@ class ApiKeyAnalyzer(BaseAttackModule):
                 total_found += len(found)
 
         if total_found == 0:
-            result.findings.append(Finding(
-                title="No Exposed API Keys Found",
-                description="No API keys, secrets, or tokens were detected in page source.",
-                severity=Severity.INFO,
-                module_name=self.name,
-                tags=["api-key", "discovery"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="No Exposed API Keys Found",
+                    description="No API keys, secrets, or tokens were detected in page source.",
+                    severity=Severity.INFO,
+                    module_name=self.name,
+                    tags=["api-key", "discovery"],
+                )
+            )
         else:
-            result.findings.append(Finding(
-                title=f"API Key Scan Complete",
-                description=f"Found {total_found} potential key/secret exposures.",
-                severity=Severity.INFO,
-                evidence={"total_found": total_found},
-                module_name=self.name,
-                tags=["api-key", "summary"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="API Key Scan Complete",
+                    description=f"Found {total_found} potential key/secret exposures.",
+                    severity=Severity.INFO,
+                    evidence={"total_found": total_found},
+                    module_name=self.name,
+                    tags=["api-key", "summary"],
+                )
+            )
 
         return result
 
     def _scan_text(
-        self, text: str, location: str, source_key: str | None,
+        self,
+        text: str,
+        location: str,
+        source_key: str | None,
     ) -> list[Finding]:
         """Scan text for known API key patterns."""
         findings: list[Finding] = []
@@ -150,25 +170,27 @@ class ApiKeyAnalyzer(BaseAttackModule):
                     if source_key:
                         evidence["source_key"] = source_key
 
-                    findings.append(Finding(
-                        title=f"Exposed {label} Detected",
-                        description=(
-                            f"A {label} was found in {location}. "
-                            "Exposed keys can be used by attackers to access "
-                            "services and data."
-                        ),
-                        severity=severity,
-                        evidence=evidence,
-                        remediation=(
-                            f"Remove the {label} from client-side code. "
-                            "Use environment variables or a secrets manager. "
-                            "Rotate the key immediately if it has been exposed."
-                        ),
-                        cwe_id="CWE-798",
-                        module_name=self.name,
-                        confidence=0.85 if risk != "high" else 0.7,
-                        tags=["api-key", "secret-exposure", label.lower().replace(" ", "-")],
-                    ))
+                    findings.append(
+                        Finding(
+                            title=f"Exposed {label} Detected",
+                            description=(
+                                f"A {label} was found in {location}. "
+                                "Exposed keys can be used by attackers to access "
+                                "services and data."
+                            ),
+                            severity=severity,
+                            evidence=evidence,
+                            remediation=(
+                                f"Remove the {label} from client-side code. "
+                                "Use environment variables or a secrets manager. "
+                                "Rotate the key immediately if it has been exposed."
+                            ),
+                            cwe_id="CWE-798",
+                            module_name=self.name,
+                            confidence=0.85 if risk != "high" else 0.7,
+                            tags=["api-key", "secret-exposure", label.lower().replace(" ", "-")],
+                        )
+                    )
             except re.error:
                 pass
 
@@ -179,13 +201,23 @@ class ApiKeyAnalyzer(BaseAttackModule):
         """Check if a match is likely a false positive."""
         # Skip if in a comment that looks like documentation
         context_start = max(0, start - 50)
-        context = full_text[context_start:start + len(match) + 50].lower()
+        context = full_text[context_start : start + len(match) + 50].lower()
 
         false_positive_indicators = [
-            "your_", "placeholder", "sk_test_", "pk_test",
-            "test_key", "demo", "sample", "<your-", "your-",
-            "xxxx", "****",
-            "replace with", "put your", "enter your",
+            "your_",
+            "placeholder",
+            "sk_test_",
+            "pk_test",
+            "test_key",
+            "demo",
+            "sample",
+            "<your-",
+            "your-",
+            "xxxx",
+            "****",
+            "replace with",
+            "put your",
+            "enter your",
         ]
 
         for indicator in false_positive_indicators:
@@ -199,8 +231,15 @@ class ApiKeyAnalyzer(BaseAttackModule):
         findings: list[Finding] = []
 
         sensitive_params = [
-            "api_key", "apikey", "key", "token", "access_token",
-            "auth", "secret", "password", "passwd",
+            "api_key",
+            "apikey",
+            "key",
+            "token",
+            "access_token",
+            "auth",
+            "secret",
+            "password",
+            "passwd",
         ]
 
         if "?" not in url:
@@ -212,23 +251,25 @@ class ApiKeyAnalyzer(BaseAttackModule):
                 name = param.split("=", 1)[0].lower()
                 for sensitive in sensitive_params:
                     if sensitive in name:
-                        findings.append(Finding(
-                            title="API Key in URL Parameter",
-                            description=(
-                                f"URL parameter '{name}' appears to contain a key/token. "
-                                "Keys in URLs are logged and leaked via Referer headers."
-                            ),
-                            severity=Severity.HIGH,
-                            evidence={"url": url, "param": name},
-                            remediation=(
-                                "Never pass API keys in URL query parameters. "
-                                "Use HTTP headers (Authorization, X-API-Key) instead."
-                            ),
-                            cwe_id="CWE-598",
-                            module_name=self.name,
-                            confidence=0.9,
-                            tags=["api-key", "url-param"],
-                        ))
+                        findings.append(
+                            Finding(
+                                title="API Key in URL Parameter",
+                                description=(
+                                    f"URL parameter '{name}' appears to contain a key/token. "
+                                    "Keys in URLs are logged and leaked via Referer headers."
+                                ),
+                                severity=Severity.HIGH,
+                                evidence={"url": url, "param": name},
+                                remediation=(
+                                    "Never pass API keys in URL query parameters. "
+                                    "Use HTTP headers (Authorization, X-API-Key) instead."
+                                ),
+                                cwe_id="CWE-598",
+                                module_name=self.name,
+                                confidence=0.9,
+                                tags=["api-key", "url-param"],
+                            )
+                        )
                         break
 
         return findings

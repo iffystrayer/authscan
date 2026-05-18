@@ -9,6 +9,7 @@ The HTTP client must:
   * Permit private-host redirects only when the operator explicitly
     sets ``allow_private_redirects=True``.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -18,49 +19,56 @@ import responses
 
 from auth_scan.core.exceptions import ScopeError
 from auth_scan.core.http_client import (
+    HTTPClient,
     _ip_is_blocked,
     _is_private_or_metadata_host,
-    HTTPClient,
 )
 
 
 class TestIsPrivateOrMetadataHost:
     """Unit tests for the private/metadata host classifier."""
 
-    @pytest.mark.parametrize("addr", [
-        "127.0.0.1",
-        "127.255.255.255",
-        "10.0.0.5",
-        "10.255.255.255",
-        "172.16.0.1",
-        "192.168.1.1",
-        "169.254.169.254",
-        "0.0.0.0",
-        "::1",
-        "fe80::1",
-        "fc00::1",
-        "fd00:ec2::254",
-    ])
+    @pytest.mark.parametrize(
+        "addr",
+        [
+            "127.0.0.1",
+            "127.255.255.255",
+            "10.0.0.5",
+            "10.255.255.255",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "::1",
+            "fe80::1",
+            "fc00::1",
+            "fd00:ec2::254",
+        ],
+    )
     def test_private_ip_literals_blocked(self, addr: str) -> None:
         assert _is_private_or_metadata_host(addr) is True
 
-    @pytest.mark.parametrize("addr", [
-        "8.8.8.8",
-        "1.1.1.1",
-        "203.0.113.5",   # TEST-NET-3 — public-ish for our purposes
-    ])
+    @pytest.mark.parametrize(
+        "addr",
+        [
+            "8.8.8.8",
+            "1.1.1.1",
+            "203.0.113.5",  # TEST-NET-3 — public-ish for our purposes
+        ],
+    )
     def test_public_ip_literals_allowed(self, addr: str) -> None:
         # TEST-NET ranges are reserved per ipaddress, so 203.0.113.5
         # is actually reserved. Use only true public-ish addresses.
-        assert _is_private_or_metadata_host(addr) is _ip_is_blocked(
-            ipaddress.ip_address(addr)
-        )
+        assert _is_private_or_metadata_host(addr) is _ip_is_blocked(ipaddress.ip_address(addr))
 
-    @pytest.mark.parametrize("name", [
-        "metadata.google.internal",
-        "metadata.azure.com",
-        "INSTANCE-DATA",  # case-insensitive
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "metadata.google.internal",
+            "metadata.azure.com",
+            "INSTANCE-DATA",  # case-insensitive
+        ],
+    )
     def test_metadata_hostnames_blocked(self, name: str) -> None:
         assert _is_private_or_metadata_host(name) is True
 

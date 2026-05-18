@@ -1,4 +1,5 @@
 """Base classes and data models for attack modules."""
+
 from __future__ import annotations
 
 import hashlib
@@ -15,10 +16,10 @@ class Severity(str, Enum):
     """Finding severity levels with numeric ranges for CVSS mapping."""
 
     CRITICAL = "critical"  # 9.0 - 10.0
-    HIGH = "high"          # 7.0 - 8.9
-    MEDIUM = "medium"      # 4.0 - 6.9
-    LOW = "low"            # 0.1 - 3.9
-    INFO = "info"          # 0.0
+    HIGH = "high"  # 7.0 - 8.9
+    MEDIUM = "medium"  # 4.0 - 6.9
+    LOW = "low"  # 0.1 - 3.9
+    INFO = "info"  # 0.0
 
     @property
     def numeric(self) -> float:
@@ -191,7 +192,11 @@ class ScanReport:
         if not self.findings:
             return Severity.INFO
         severity_order = [
-            Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO,
+            Severity.CRITICAL,
+            Severity.HIGH,
+            Severity.MEDIUM,
+            Severity.LOW,
+            Severity.INFO,
         ]
         for sev in severity_order:
             if any(f.severity == sev for f in self.findings):
@@ -241,6 +246,7 @@ class ScanReport:
     def to_json(self, redact: bool = True, indent: int = 2) -> str:
         """Serialize report to JSON string."""
         import json
+
         return json.dumps(self.to_dict(redact=redact), indent=indent)
 
 
@@ -280,17 +286,47 @@ class BaseAttackModule(ABC):
 
 # Exact-match keys (lower-cased) that are always redacted regardless of value.
 REDACT_KEYS = {
-    "authorization", "set-cookie", "cookie", "x-api-key", "token",
-    "password", "secret", "api_key", "jwt", "access_token", "refresh_token",
-    "id_token", "client_secret", "client_id", "session_id", "sessionid",
-    "private_key", "csrf_token", "xsrf_token", "x-csrf-token", "x-xsrf-token",
-    "api-key", "apikey", "bearer", "auth", "auth_token",
+    "authorization",
+    "set-cookie",
+    "cookie",
+    "x-api-key",
+    "token",
+    "password",
+    "secret",
+    "api_key",
+    "jwt",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "client_secret",
+    "client_id",
+    "session_id",
+    "sessionid",
+    "private_key",
+    "csrf_token",
+    "xsrf_token",
+    "x-csrf-token",
+    "x-xsrf-token",
+    "api-key",
+    "apikey",
+    "bearer",
+    "auth",
+    "auth_token",
 }
 
 # Substrings (lower-cased) — any key containing one of these is redacted.
 REDACT_KEY_SUBSTRINGS = (
-    "password", "secret", "token", "apikey", "api_key", "api-key",
-    "auth", "session", "cookie", "private", "credential",
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "api-key",
+    "auth",
+    "session",
+    "cookie",
+    "private",
+    "credential",
 )
 
 # Token-shaped value detectors. Any value matching one is replaced with a

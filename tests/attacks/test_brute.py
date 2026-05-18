@@ -1,10 +1,11 @@
 """Tests for the Brute Force attack module."""
+
 from __future__ import annotations
 
 import responses
 
 from auth_scan.attacks.base import ScanReport
-from auth_scan.attacks.brute import BruteForce, DEFAULT_CREDENTIALS
+from auth_scan.attacks.brute import DEFAULT_CREDENTIALS, BruteForce
 from auth_scan.core.config import ScanConfig
 from auth_scan.core.http_client import HTTPClient
 
@@ -116,8 +117,10 @@ class TestBruteForce:
             result = bf._test_form(form, [("admin", "admin")], "https://example.com", client)
             # With 200 status and no error keywords, should flag as valid
             assert len(result.findings) >= 1
-            assert any("Weak" in f.title or "Default" in f.title or "Credentials" in f.title
-                       or "Accepted" in f.title for f in result.findings)
+            assert any(
+                "Weak" in f.title or "Default" in f.title or "Credentials" in f.title or "Accepted" in f.title
+                for f in result.findings
+            )
 
         run()
 
@@ -210,12 +213,9 @@ class TestLockoutDetection:
         @responses.activate
         def run():
             # First a couple of real-looking failures, then a 423 Locked.
-            responses.add(responses.POST, "https://example.com/login",
-                          body="invalid password", status=401)
-            responses.add(responses.POST, "https://example.com/login",
-                          body="invalid password", status=401)
-            responses.add(responses.POST, "https://example.com/login",
-                          body="Account locked", status=423)
+            responses.add(responses.POST, "https://example.com/login", body="invalid password", status=401)
+            responses.add(responses.POST, "https://example.com/login", body="invalid password", status=401)
+            responses.add(responses.POST, "https://example.com/login", body="Account locked", status=423)
             client = HTTPClient(base_url="https://example.com", rate_limit=1000)
             creds = [("u1", "p1"), ("u2", "p2"), ("u3", "p3"), ("u4", "p4")]
             result = bf._test_form(self._form(), creds, "https://example.com", client)
@@ -233,11 +233,13 @@ class TestLockoutDetection:
 
         @responses.activate
         def run():
-            responses.add(responses.POST, "https://example.com/login",
-                          body="invalid credentials", status=401)
-            responses.add(responses.POST, "https://example.com/login",
-                          body="Your account has been locked. Too many attempts.",
-                          status=403)
+            responses.add(responses.POST, "https://example.com/login", body="invalid credentials", status=401)
+            responses.add(
+                responses.POST,
+                "https://example.com/login",
+                body="Your account has been locked. Too many attempts.",
+                status=403,
+            )
             client = HTTPClient(base_url="https://example.com", rate_limit=1000)
             result = bf._test_form(
                 self._form(),
@@ -247,9 +249,12 @@ class TestLockoutDetection:
             )
             assert any("Lockout" in f.title for f in result.findings)
             lockout = next(f for f in result.findings if "Lockout" in f.title)
-            assert lockout.evidence.get("matched_keyword") in {"locked", "too many attempts",
-                                                                "account is locked",
-                                                                "account has been locked"}
+            assert lockout.evidence.get("matched_keyword") in {
+                "locked",
+                "too many attempts",
+                "account is locked",
+                "account has been locked",
+            }
 
         run()
 
@@ -263,8 +268,7 @@ class TestLockoutDetection:
             # 12 failures so we have > 10 timings; responses will reply
             # immediately so all durations are similar (no slowdown).
             for _ in range(12):
-                responses.add(responses.POST, "https://example.com/login",
-                              body="invalid", status=401)
+                responses.add(responses.POST, "https://example.com/login", body="invalid", status=401)
             client = HTTPClient(base_url="https://example.com", rate_limit=1000)
             creds = [(f"u{i}", f"p{i}") for i in range(12)]
             result = bf._test_form(self._form(), creds, "https://example.com", client)
@@ -309,8 +313,7 @@ class TestCsrfRefresh:
 
         # Mutable cell so the GET callback can hand out a new token each
         # call, and the POST callback can verify the most recent one.
-        state = {"current_token": "", "get_count": 0, "post_count": 0,
-                 "accepted_token": None}
+        state = {"current_token": "", "get_count": 0, "post_count": 0, "accepted_token": None}
 
         @responses.activate
         def run():
@@ -334,16 +337,13 @@ class TestCsrfRefresh:
                 # GET's token, reject as stale.
                 if f"csrf_token={state['current_token']}" not in body:
                     return (403, {}, "stale csrf")
-                if "username=admin&password=admin" in body or \
-                   "password=admin&username=admin" in body:
+                if "username=admin&password=admin" in body or "password=admin&username=admin" in body:
                     state["accepted_token"] = state["current_token"]
                     return (200, {}, "Welcome, admin!")
                 return (401, {}, "invalid")
 
-            responses.add_callback(responses.GET, "https://example.com/login",
-                                   callback=get_login)
-            responses.add_callback(responses.POST, "https://example.com/login",
-                                   callback=post_login)
+            responses.add_callback(responses.GET, "https://example.com/login", callback=get_login)
+            responses.add_callback(responses.POST, "https://example.com/login", callback=post_login)
             client = HTTPClient(base_url="https://example.com", rate_limit=1000)
             # Multiple wrong creds before the right ones, so we'd fail on
             # any reuse of the original probe-time token.
@@ -355,9 +355,9 @@ class TestCsrfRefresh:
             )
             assert state["accepted_token"] is not None, "Login never succeeded"
             assert state["accepted_token"] != "STALE-CAPTURED-AT-PROBE"
-            assert any(
-                "Credentials Accepted" in f.title for f in result.findings
-            ), [f.title for f in result.findings]
+            assert any("Credentials Accepted" in f.title for f in result.findings), [
+                f.title for f in result.findings
+            ]
 
         run()
 
@@ -369,15 +369,15 @@ class TestCsrfRefresh:
         @responses.activate
         def run():
             # GET returns 500 so the refresh fails and falls back.
-            responses.add(responses.GET, "https://example.com/login",
-                          status=500, body="boom")
-            responses.add(responses.POST, "https://example.com/login",
-                          body="Welcome", status=200)
+            responses.add(responses.GET, "https://example.com/login", status=500, body="boom")
+            responses.add(responses.POST, "https://example.com/login", body="Welcome", status=200)
             client = HTTPClient(base_url="https://example.com", rate_limit=1000)
             result = bf._test_form(
-                self._form(), [("admin", "admin")], "https://example.com", client,
+                self._form(),
+                [("admin", "admin")],
+                "https://example.com",
+                client,
             )
             assert any("Credentials Accepted" in f.title for f in result.findings)
 
         run()
-

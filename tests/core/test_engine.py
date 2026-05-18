@@ -1,8 +1,8 @@
 """Tests for the scan engine and ScanReport."""
+
 from __future__ import annotations
 
 from auth_scan.attacks.base import Finding, ScanReport, Severity
-from auth_scan.core.config import ScanConfig
 
 
 class TestScanReport:
@@ -48,9 +48,14 @@ class TestScanReport:
 
     def test_risk_score(self) -> None:
         report = ScanReport(target="https://example.com")
-        report.add_finding(Finding(
-            title="C1", severity=Severity.CRITICAL, module_name="t", cvss_score=9.8,
-        ))
+        report.add_finding(
+            Finding(
+                title="C1",
+                severity=Severity.CRITICAL,
+                module_name="t",
+                cvss_score=9.8,
+            )
+        )
         assert report.risk_score > 0
 
     def test_exit_code_critical(self) -> None:

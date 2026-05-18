@@ -1,4 +1,5 @@
 """Path discovery — probes common auth-related endpoints."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -112,7 +113,7 @@ def discover_paths(
             status = resp.status_code
 
             # Normalize path
-            clean_path = path.rstrip("/") or "/"
+            path.rstrip("/") or "/"
 
             results[path] = {
                 "status": status,
@@ -148,52 +149,62 @@ def report_discoveries(
     interesting = {p: r for p, r in results.items() if r["interesting"]}
 
     if not interesting:
-        findings.append(Finding(
-            title="Path Discovery: No Interesting Endpoints",
-            description="No interesting auth-related paths discovered beyond the root.",
-            severity=Severity.INFO,
-            module_name=module_name,
-            tags=["discovery", "paths"],
-        ))
+        findings.append(
+            Finding(
+                title="Path Discovery: No Interesting Endpoints",
+                description="No interesting auth-related paths discovered beyond the root.",
+                severity=Severity.INFO,
+                module_name=module_name,
+                tags=["discovery", "paths"],
+            )
+        )
         return
 
     # Group by status
     for path, result in sorted(interesting.items()):
         status = result["status"]
         if status == 200:
-            findings.append(Finding(
-                title=f"Path Discovered (200): {path}",
-                description=f"Accessible path found: {path} (HTTP 200, {result['length']} bytes).",
-                severity=Severity.INFO,
-                evidence={"path": path, "status": status},
-                module_name=module_name,
-                tags=["discovery", "paths"],
-            ))
+            findings.append(
+                Finding(
+                    title=f"Path Discovered (200): {path}",
+                    description=f"Accessible path found: {path} (HTTP 200, {result['length']} bytes).",
+                    severity=Severity.INFO,
+                    evidence={"path": path, "status": status},
+                    module_name=module_name,
+                    tags=["discovery", "paths"],
+                )
+            )
         elif status in (301, 302, 307, 308):
             location = result["headers"].get("Location", result["headers"].get("location", ""))
-            findings.append(Finding(
-                title=f"Redirect at: {path}",
-                description=f"Path {path} redirects (HTTP {status}) to {location}.",
-                severity=Severity.INFO,
-                evidence={"path": path, "status": status, "redirect_to": location},
-                module_name=module_name,
-                tags=["discovery", "paths"],
-            ))
+            findings.append(
+                Finding(
+                    title=f"Redirect at: {path}",
+                    description=f"Path {path} redirects (HTTP {status}) to {location}.",
+                    severity=Severity.INFO,
+                    evidence={"path": path, "status": status, "redirect_to": location},
+                    module_name=module_name,
+                    tags=["discovery", "paths"],
+                )
+            )
         elif status == 401:
-            findings.append(Finding(
-                title=f"Protected Endpoint (401): {path}",
-                description=f"Path {path} requires authentication (HTTP 401).",
-                severity=Severity.INFO,
-                evidence={"path": path, "status": status},
-                module_name=module_name,
-                tags=["discovery", "paths", "auth"],
-            ))
+            findings.append(
+                Finding(
+                    title=f"Protected Endpoint (401): {path}",
+                    description=f"Path {path} requires authentication (HTTP 401).",
+                    severity=Severity.INFO,
+                    evidence={"path": path, "status": status},
+                    module_name=module_name,
+                    tags=["discovery", "paths", "auth"],
+                )
+            )
         elif status == 403:
-            findings.append(Finding(
-                title=f"Forbidden Endpoint (403): {path}",
-                description=f"Path {path} is forbidden (HTTP 403). May contain sensitive resources.",
-                severity=Severity.LOW,
-                evidence={"path": path, "status": status},
-                module_name=module_name,
-                tags=["discovery", "paths"],
-            ))
+            findings.append(
+                Finding(
+                    title=f"Forbidden Endpoint (403): {path}",
+                    description=f"Path {path} is forbidden (HTTP 403). May contain sensitive resources.",
+                    severity=Severity.LOW,
+                    evidence={"path": path, "status": status},
+                    module_name=module_name,
+                    tags=["discovery", "paths"],
+                )
+            )

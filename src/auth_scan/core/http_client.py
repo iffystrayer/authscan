@@ -1,4 +1,5 @@
 """HTTP client with session management, retry, proxy, rate limiting, and scope enforcement."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -21,13 +22,15 @@ MAX_REDIRECTS = 10
 
 # Cloud metadata endpoints — IMDS (AWS / GCP / Azure / DigitalOcean / Alibaba).
 # Any redirect to these hosts is a strong SSRF signal and is always blocked.
-CLOUD_METADATA_HOSTS = frozenset({
-    "169.254.169.254",       # AWS / GCP / Azure / DO / OCI / Alibaba
-    "metadata.google.internal",
-    "metadata.azure.com",
-    "instance-data",
-    "fd00:ec2::254",          # AWS IMDSv2 IPv6
-})
+CLOUD_METADATA_HOSTS = frozenset(
+    {
+        "169.254.169.254",  # AWS / GCP / Azure / DO / OCI / Alibaba
+        "metadata.google.internal",
+        "metadata.azure.com",
+        "instance-data",
+        "fd00:ec2::254",  # AWS IMDSv2 IPv6
+    }
+)
 
 
 def _is_private_or_metadata_host(host: str) -> bool:
@@ -286,9 +289,7 @@ class HTTPClient:
             return
         host = urlparse(url).hostname or ""
         if _is_private_or_metadata_host(host):
-            raise ScopeError(
-                f"Refusing to follow redirect to private/metadata host: {url}"
-            )
+            raise ScopeError(f"Refusing to follow redirect to private/metadata host: {url}")
 
     def _follow_redirects(
         self,
@@ -308,9 +309,7 @@ class HTTPClient:
         hops = 0
         while response.is_redirect or response.is_permanent_redirect:
             if hops >= MAX_REDIRECTS:
-                raise HttpError(
-                    f"Exceeded max redirects ({MAX_REDIRECTS}); last URL: {response.url}"
-                )
+                raise HttpError(f"Exceeded max redirects ({MAX_REDIRECTS}); last URL: {response.url}")
             location = response.headers.get("Location")
             if not location:
                 break
@@ -420,7 +419,9 @@ class HTTPClient:
             raise HttpError(f"Request timed out after {self.timeout}s: {url}") from e
         except requests.exceptions.ConnectionError as e:
             duration_ms = (time.monotonic() - start_time) * 1000
-            self._record_request(request_id, method, url, error=f"Connection error: {e}", duration_ms=duration_ms)
+            self._record_request(
+                request_id, method, url, error=f"Connection error: {e}", duration_ms=duration_ms
+            )
             raise HttpError(f"Connection failed: {url} - {e}") from e
         except requests.exceptions.SSLError as e:
             duration_ms = (time.monotonic() - start_time) * 1000
@@ -462,9 +463,7 @@ class HTTPClient:
             self._check_scope(url)
             self.rate_limiter.acquire()
             response = self.session.get(url, timeout=self.timeout, allow_redirects=False)
-            response, manual_chain = self._follow_redirects(
-                response, "GET", {"timeout": self.timeout}
-            )
+            response, manual_chain = self._follow_redirects(response, "GET", {"timeout": self.timeout})
             redirect_chain.extend(manual_chain)
         except HttpError:
             # Try HTTP fallback
@@ -498,11 +497,13 @@ class HTTPClient:
                     "inputs": [],
                 }
                 for inp in form.find_all(["input", "select", "textarea"]):
-                    form_data["inputs"].append({
-                        "name": inp.get("name", ""),
-                        "type": inp.get("type", "text"),
-                        "value": inp.get("value", ""),
-                    })
+                    form_data["inputs"].append(
+                        {
+                            "name": inp.get("name", ""),
+                            "type": inp.get("type", "text"),
+                            "value": inp.get("value", ""),
+                        }
+                    )
                 forms.append(form_data)
         except Exception:
             pass

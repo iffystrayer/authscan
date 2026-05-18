@@ -1,4 +1,5 @@
 """Tests for MFA bypass module."""
+
 from __future__ import annotations
 
 import responses

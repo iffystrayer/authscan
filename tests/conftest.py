@@ -1,8 +1,8 @@
 """Shared pytest fixtures for auth-scan tests."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -14,6 +14,7 @@ from auth_scan.core.config import ScanConfig
 def vuln_app():
     """Start the vulnerable Flask test app and return a test client."""
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent / "fixtures" / "vuln_app"))
     from app import app
 
@@ -49,30 +50,36 @@ def sample_report() -> ScanReport:
         effective_target="https://example.com",
         status="completed",
     )
-    report.add_finding(Finding(
-        title="Missing HSTS Header",
-        description="HSTS header not present.",
-        severity=Severity.MEDIUM,
-        module_name="probe",
-        tags=["headers"],
-        remediation="Add Strict-Transport-Security header.",
-    ))
-    report.add_finding(Finding(
-        title="Session Cookie Missing HttpOnly",
-        description="Session cookie has no HttpOnly flag.",
-        severity=Severity.HIGH,
-        module_name="session",
-        tags=["session"],
-        remediation="Set HttpOnly flag on session cookie.",
-    ))
-    report.add_finding(Finding(
-        title="JWT alg=none Accepted",
-        description="Server accepts unsigned JWTs.",
-        severity=Severity.CRITICAL,
-        module_name="jwt_analyzer",
-        tags=["jwt", "critical"],
-        remediation="Reject tokens with alg=none.",
-    ))
+    report.add_finding(
+        Finding(
+            title="Missing HSTS Header",
+            description="HSTS header not present.",
+            severity=Severity.MEDIUM,
+            module_name="probe",
+            tags=["headers"],
+            remediation="Add Strict-Transport-Security header.",
+        )
+    )
+    report.add_finding(
+        Finding(
+            title="Session Cookie Missing HttpOnly",
+            description="Session cookie has no HttpOnly flag.",
+            severity=Severity.HIGH,
+            module_name="session",
+            tags=["session"],
+            remediation="Set HttpOnly flag on session cookie.",
+        )
+    )
+    report.add_finding(
+        Finding(
+            title="JWT alg=none Accepted",
+            description="Server accepts unsigned JWTs.",
+            severity=Severity.CRITICAL,
+            module_name="jwt_analyzer",
+            tags=["jwt", "critical"],
+            remediation="Reject tokens with alg=none.",
+        )
+    )
     return report
 
 
@@ -82,17 +89,23 @@ def sample_jwt_token() -> str:
     import base64
     import json
 
-    header = base64.urlsafe_b64encode(
-        json.dumps({"alg": "HS256", "typ": "JWT"}).encode()
-    ).rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(
-        json.dumps({
-            "sub": "testuser",
-            "email": "test@example.com",
-            "exp": 9999999999,
-            "iat": 1000000000,
-        }).encode()
-    ).rstrip(b"=").decode()
+    header = (
+        base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=").decode()
+    )
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "sub": "testuser",
+                    "email": "test@example.com",
+                    "exp": 9999999999,
+                    "iat": 1000000000,
+                }
+            ).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
     return f"{header}.{payload}.fakesignature"
 
 
@@ -102,12 +115,12 @@ def sample_jwt_none() -> str:
     import base64
     import json
 
-    header = base64.urlsafe_b64encode(
-        json.dumps({"alg": "none", "typ": "JWT"}).encode()
-    ).rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"sub": "admin", "role": "admin"}).encode()
-    ).rstrip(b"=").decode()
+    header = (
+        base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).rstrip(b"=").decode()
+    )
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"sub": "admin", "role": "admin"}).encode()).rstrip(b"=").decode()
+    )
     return f"{header}.{payload}."
 
 
@@ -134,6 +147,7 @@ def mock_http_client():
     @responses.activate
     def _make_client(base_url="https://example.com", **kwargs):
         from auth_scan.core.http_client import HTTPClient
+
         return HTTPClient(base_url=base_url, rate_limit=100, **kwargs)
 
     return _make_client

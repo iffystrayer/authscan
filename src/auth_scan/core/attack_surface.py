@@ -1,4 +1,5 @@
 """Attack Surface Model — live graph of discovered auth surface."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -90,7 +91,9 @@ class AttackSurfaceModel:
 
     def add_token(self, token: ModelToken) -> None:
         """Add a token, deduplicating by type+location."""
-        existing = [t for t in self.tokens if t.token_type == token.token_type and t.location == token.location]
+        existing = [
+            t for t in self.tokens if t.token_type == token.token_type and t.location == token.location
+        ]
         if not existing:
             self.tokens.append(token)
         else:
@@ -161,7 +164,7 @@ class AttackSurfaceModel:
             conf += 0.15
 
         # Each auth mechanism discovered and tested
-        for mech in self._mechanisms_tested:
+        for _mech in self._mechanisms_tested:
             conf += 0.10
 
         # Tokens analyzed

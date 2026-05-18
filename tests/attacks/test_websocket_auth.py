@@ -1,4 +1,5 @@
 """Tests for WebSocket auth module."""
+
 from __future__ import annotations
 
 from auth_scan.attacks.base import ScanReport

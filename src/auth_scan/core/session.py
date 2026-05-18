@@ -1,4 +1,5 @@
 """Session, token, and cookie analysis utilities."""
+
 from __future__ import annotations
 
 import base64
@@ -90,10 +91,18 @@ class TokenInfo:
 
         # PII patterns
         sensitive_keys = [
-            "password", "passwd", "secret", "apikey", "api_key", "token",
-            "creditcard", "credit_card", "ssn", "social_security",
+            "password",
+            "passwd",
+            "secret",
+            "apikey",
+            "api_key",
+            "token",
+            "creditcard",
+            "credit_card",
+            "ssn",
+            "social_security",
         ]
-        for key, value in self.payload.items():
+        for key, _value in self.payload.items():
             key_lower = key.lower()
             for sensitive in sensitive_keys:
                 if sensitive in key_lower:
@@ -110,7 +119,12 @@ class TokenInfo:
         # Possible internal IDs
         for key, value in self.payload.items():
             if isinstance(value, (int, str)) and key.lower() in (
-                "user_id", "uid", "id", "account_id", "internal_id", "role",
+                "user_id",
+                "uid",
+                "id",
+                "account_id",
+                "internal_id",
+                "role",
             ):
                 issues.append(f"Potentially sensitive '{key}' in JWT payload: {value}")
 
@@ -164,16 +178,21 @@ class CookieAnalysis:
 
     @classmethod
     def from_requests_cookie(
-        cls, name: str, value: str, rest: dict[str, str] | None = None,
+        cls,
+        name: str,
+        value: str,
+        rest: dict[str, str] | None = None,
     ) -> CookieAnalysis:
         """Create from a requests library cookie object's attributes."""
         rest = rest or {}
         cookie = cls(
             name=name,
             value=value,
-            http_only=rest.get("httponly", False) if isinstance(rest.get("httponly"), bool)
+            http_only=rest.get("httponly", False)
+            if isinstance(rest.get("httponly"), bool)
             else rest.get("httponly", "").lower() == "true",
-            secure=rest.get("secure", False) if isinstance(rest.get("secure"), bool)
+            secure=rest.get("secure", False)
+            if isinstance(rest.get("secure"), bool)
             else rest.get("secure", "").lower() == "true",
             same_site=rest.get("samesite", ""),
             domain=rest.get("domain", ""),
@@ -206,21 +225,17 @@ class CookieAnalysis:
             self.issues.append(f"Cookie '{self.name}' missing Secure flag — transmitted over HTTP")
 
         if not self.same_site:
-            self.issues.append(
-                f"Cookie '{self.name}' missing SameSite attribute — susceptible to CSRF"
-            )
+            self.issues.append(f"Cookie '{self.name}' missing SameSite attribute — susceptible to CSRF")
         elif self.same_site.lower() == "none" and not self.secure:
             self.issues.append(
-                f"Cookie '{self.name}' has SameSite=None without Secure — "
-                f"will be rejected by browsers"
+                f"Cookie '{self.name}' has SameSite=None without Secure — will be rejected by browsers"
             )
 
         # Broad domain
         if self.domain and not self.domain.startswith("."):
             if len(self.domain.split(".")) == 2:  # e.g., "example.com"
                 self.issues.append(
-                    f"Cookie '{self.name}' has broad Domain={self.domain} — "
-                    f"may leak to subdomains"
+                    f"Cookie '{self.name}' has broad Domain={self.domain} — may leak to subdomains"
                 )
 
 
@@ -294,11 +309,13 @@ def find_session_ids_in_content(content: str) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     for pattern in SESSION_ID_PATTERNS:
         for match in pattern.finditer(content):
-            results.append({
-                "url": match.string[max(0, match.start() - 50):match.end() + 50].strip(),
-                "token_name": match.group(0).split("=")[0].lstrip("?&"),
-                "token_value": match.group(1),
-            })
+            results.append(
+                {
+                    "url": match.string[max(0, match.start() - 50) : match.end() + 50].strip(),
+                    "token_name": match.group(0).split("=")[0].lstrip("?&"),
+                    "token_value": match.group(1),
+                }
+            )
     return results
 
 
@@ -352,9 +369,9 @@ def analyze_session_id_entropy(session_id: str) -> dict[str, Any]:
     max_entropy = math.log2(min(charset_max, charset_size))
 
     if max_entropy > 0:
-        entropy_ratio = entropy / (max_entropy * length / length) if max_entropy else 0
+        entropy / (max_entropy * length / length) if max_entropy else 0
     else:
-        entropy_ratio = 0.0
+        pass
 
     # Heuristic assessment
     if entropy < 3.0 or length < 16:
@@ -372,7 +389,6 @@ def analyze_session_id_entropy(session_id: str) -> dict[str, Any]:
         "max_possible_entropy_per_char": round(max_entropy, 2),
         "assessment": assessment,
         "recommendation": (
-            "Use at least 128 bits of entropy (e.g., 32 hex chars, "
-            "22 base64 chars) with a CSPRNG."
+            "Use at least 128 bits of entropy (e.g., 32 hex chars, 22 base64 chars) with a CSPRNG."
         ),
     }

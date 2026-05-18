@@ -1,7 +1,7 @@
 """Brute force and credential testing module."""
+
 from __future__ import annotations
 
-import concurrent.futures
 import time
 from pathlib import Path
 from typing import Any
@@ -98,14 +98,16 @@ class BruteForce(BaseAttackModule):
         # FR-BF-001: Discover login forms
         login_forms = self._discover_login_forms(report)
         if not login_forms:
-            result.findings.append(Finding(
-                title="No Login Forms Found",
-                description="Cannot test credentials without discovering a login form. "
-                "Check if the target uses a non-standard login mechanism.",
-                severity=Severity.INFO,
-                module_name=self.name,
-                tags=["brute", "discovery"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="No Login Forms Found",
+                    description="Cannot test credentials without discovering a login form. "
+                    "Check if the target uses a non-standard login mechanism.",
+                    severity=Severity.INFO,
+                    module_name=self.name,
+                    tags=["brute", "discovery"],
+                )
+            )
             return result
 
         # Load wordlists
@@ -137,32 +139,32 @@ class BruteForce(BaseAttackModule):
             if has_password and has_text:
                 # Identify the username and password fields
                 username_fields = [
-                    inp["name"] for inp in inputs
-                    if inp["type"] in ("text", "email", "") and inp["name"]
+                    inp["name"] for inp in inputs if inp["type"] in ("text", "email", "") and inp["name"]
                 ]
-                password_fields = [
-                    inp["name"] for inp in inputs
-                    if inp["type"] == "password" and inp["name"]
-                ]
+                password_fields = [inp["name"] for inp in inputs if inp["type"] == "password" and inp["name"]]
                 # Find CSRF/hidden fields
                 hidden_fields = [
                     {"name": inp["name"], "value": inp.get("value", "")}
                     for inp in inputs
                     if inp["type"] == "hidden" and inp["name"]
                 ]
-                login_forms.append({
-                    "action": form.get("action", ""),
-                    "method": form.get("method", "POST"),
-                    "username_field": username_fields[0] if username_fields else "username",
-                    "password_field": password_fields[0] if password_fields else "password",
-                    "hidden_fields": hidden_fields,
-                    "inputs": inputs,
-                })
+                login_forms.append(
+                    {
+                        "action": form.get("action", ""),
+                        "method": form.get("method", "POST"),
+                        "username_field": username_fields[0] if username_fields else "username",
+                        "password_field": password_fields[0] if password_fields else "password",
+                        "hidden_fields": hidden_fields,
+                        "inputs": inputs,
+                    }
+                )
 
         return login_forms
 
     def _load_credentials(
-        self, wordlist_path: str, user_wordlist_path: str,
+        self,
+        wordlist_path: str,
+        user_wordlist_path: str,
     ) -> list[tuple[str, str]]:
         """FR-BF-002, FR-BF-003: Load credentials from wordlists or defaults."""
         usernames: list[str] = []
@@ -182,9 +184,9 @@ class BruteForce(BaseAttackModule):
 
         # Use discovered usernames + wordlist passwords
         if not usernames:
-            usernames = list(set(u for u, _ in DEFAULT_CREDENTIALS))[:10]
+            usernames = list({u for u, _ in DEFAULT_CREDENTIALS})[:10]
         if not passwords:
-            passwords = list(set(p for _, p in DEFAULT_CREDENTIALS))[:50]
+            passwords = list({p for _, p in DEFAULT_CREDENTIALS})[:50]
 
         # Generate combinations (cartesian product, capped)
         credentials: list[tuple[str, str]] = []
@@ -210,7 +212,9 @@ class BruteForce(BaseAttackModule):
         return entries
 
     def _fetch_hidden_fields(
-        self, http_client: Any, form_page_url: str,
+        self,
+        http_client: Any,
+        form_page_url: str,
     ) -> dict[str, str] | None:
         """Re-fetch the login page and parse a fresh set of hidden inputs.
 
@@ -220,6 +224,7 @@ class BruteForce(BaseAttackModule):
         """
         try:
             from bs4 import BeautifulSoup
+
             resp = http_client.get(form_page_url)
         except Exception:
             return None
@@ -274,8 +279,12 @@ class BruteForce(BaseAttackModule):
         # the response body. We snapshot any one that fires for the
         # finding's evidence.
         lockout_body_keywords = (
-            "locked", "suspended", "disabled", "too many attempts",
-            "account is locked", "account has been locked",
+            "locked",
+            "suspended",
+            "disabled",
+            "too many attempts",
+            "account is locked",
+            "account has been locked",
         )
         lockout_signal: dict[str, Any] | None = None
 
@@ -285,7 +294,8 @@ class BruteForce(BaseAttackModule):
         static_hidden = {hf["name"]: hf["value"] for hf in hidden_fields}
 
         def test_single(
-            creds: tuple[str, str], stale_csrf: bool = False,
+            creds: tuple[str, str],
+            stale_csrf: bool = False,
         ) -> dict[str, Any] | None:
             """Issue one credential attempt. Refreshes hidden form fields
             on every call (so CSRF tokens are valid) and re-fetches once
@@ -316,9 +326,8 @@ class BruteForce(BaseAttackModule):
                 # Stale-CSRF detection: a 403 or redirect back to the login
                 # page after a POST is the canonical "your token expired"
                 # signal. We refresh and retry exactly once per attempt.
-                looks_stale = (
-                    resp.status_code == 403
-                    or (resp.status_code in (301, 302) and "login" in (resp.headers.get("Location", "").lower()))
+                looks_stale = resp.status_code == 403 or (
+                    resp.status_code in (301, 302) and "login" in (resp.headers.get("Location", "").lower())
                 )
                 if looks_stale and not stale_csrf and method == "POST":
                     return test_single(creds, stale_csrf=True)
@@ -355,9 +364,7 @@ class BruteForce(BaseAttackModule):
             # phrases in the response body. Either trips lockout_detected
             # so the loop terminates immediately.
             body_for_lockout = entry["body_preview"]
-            matched_keyword = next(
-                (kw for kw in lockout_body_keywords if kw in body_for_lockout), None
-            )
+            matched_keyword = next((kw for kw in lockout_body_keywords if kw in body_for_lockout), None)
             if entry["status"] == 423 or matched_keyword is not None:
                 lockout_detected = True
                 lockout_signal = {
@@ -371,7 +378,7 @@ class BruteForce(BaseAttackModule):
             if entry["status"] == 429:
                 consecutive_429 += 1
                 result.warnings.append(
-                    f"Rate limiting detected (429 response). Consider using --rate-limit flag."
+                    "Rate limiting detected (429 response). Consider using --rate-limit flag."
                 )
                 if consecutive_429 >= 2:
                     break
@@ -392,35 +399,44 @@ class BruteForce(BaseAttackModule):
             # Detect success (heuristic: 200/302 status + no error keywords)
             body = entry["body_preview"]
             error_keywords = [
-                "invalid", "incorrect", "wrong", "failed", "error",
-                "try again", "not found", "does not exist", "unauthorized",
+                "invalid",
+                "incorrect",
+                "wrong",
+                "failed",
+                "error",
+                "try again",
+                "not found",
+                "does not exist",
+                "unauthorized",
             ]
             is_error = any(kw in body for kw in error_keywords)
 
             if entry["status"] in (200, 302) and not is_error:
                 found_valid = True
                 password_for_description = creds[1] if self._no_redact else "[REDACTED]"
-                result.findings.append(Finding(
-                    title="Weak/Default Credentials Accepted",
-                    description=(
-                        f"Login succeeded with credentials: {creds[0]}:{password_for_description}"
-                    ),
-                    severity=Severity.CRITICAL,
-                    evidence={
-                        "username": creds[0],
-                        "password": creds[1] if self._no_redact else "[REDACTED]",
-                        "status": entry["status"],
-                        "body_preview": entry["body_preview"][:200],
-                        "form_url": form_url,
-                    },
-                    remediation=f"Change the password for user '{creds[0]}' immediately. "
-                    f"Enforce a strong password policy.",
-                    cwe_id="CWE-1392",
-                    cvss_score=9.8,
-                    module_name=self.name,
-                    confidence=0.95,
-                    tags=["brute", "default-credentials"],
-                ))
+                result.findings.append(
+                    Finding(
+                        title="Weak/Default Credentials Accepted",
+                        description=(
+                            f"Login succeeded with credentials: {creds[0]}:{password_for_description}"
+                        ),
+                        severity=Severity.CRITICAL,
+                        evidence={
+                            "username": creds[0],
+                            "password": creds[1] if self._no_redact else "[REDACTED]",
+                            "status": entry["status"],
+                            "body_preview": entry["body_preview"][:200],
+                            "form_url": form_url,
+                        },
+                        remediation=f"Change the password for user '{creds[0]}' immediately. "
+                        f"Enforce a strong password policy.",
+                        cwe_id="CWE-1392",
+                        cvss_score=9.8,
+                        module_name=self.name,
+                        confidence=0.95,
+                        tags=["brute", "default-credentials"],
+                    )
+                )
                 # Continue to detect rate limiting but don't test all
 
             # Track error messages for user enumeration (FR-BF-006)
@@ -445,73 +461,77 @@ class BruteForce(BaseAttackModule):
             kw = lockout_signal["matched_keyword"]
             if kw is not None:
                 evidence["matched_keyword"] = kw
-            result.findings.append(Finding(
-                title="Account Lockout Detected",
-                description=(
-                    "Authentication endpoint reported a lockout response "
-                    f"(status={lockout_signal['status']}"
-                    + (f", keyword='{kw}'" if kw else "")
-                    + ")."
-                ),
-                severity=Severity.INFO,
-                evidence=evidence,
-                remediation=(
-                    "Lockout is a good defense; ensure the policy avoids "
-                    "permanent denial-of-service for legitimate users "
-                    "(time-bounded lockouts, notification, CAPTCHA, etc.)."
-                ),
-                module_name=self.name,
-                confidence=0.95,
-                tags=["brute", "lockout"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="Account Lockout Detected",
+                    description=(
+                        "Authentication endpoint reported a lockout response "
+                        f"(status={lockout_signal['status']}" + (f", keyword='{kw}'" if kw else "") + ")."
+                    ),
+                    severity=Severity.INFO,
+                    evidence=evidence,
+                    remediation=(
+                        "Lockout is a good defense; ensure the policy avoids "
+                        "permanent denial-of-service for legitimate users "
+                        "(time-bounded lockouts, notification, CAPTCHA, etc.)."
+                    ),
+                    module_name=self.name,
+                    confidence=0.95,
+                    tags=["brute", "lockout"],
+                )
+            )
         elif response_times and len(response_times) >= 10:
             avg_time = sum(response_times[:10]) / 10
             avg_later = sum(response_times[-5:]) / 5
             if avg_later > avg_time * 1.5:
-                result.findings.append(Finding(
-                    title="Potential Account Lockout (Timing Signal)",
-                    description=(
-                        "Response times increased substantially during the "
-                        "credential test loop, which can indicate throttling "
-                        "or progressive lockout."
-                    ),
-                    severity=Severity.INFO,
-                    evidence={
-                        "initial_avg_ms": f"{avg_time:.0f}",
-                        "later_avg_ms": f"{avg_later:.0f}",
-                        "slowdown_factor": f"{avg_later / avg_time:.2f}",
-                    },
-                    remediation=(
-                        "Verify lockout behavior. This is a good security "
-                        "measure; ensure proper duration and user notification."
-                    ),
-                    module_name=self.name,
-                    confidence=0.5,
-                    tags=["brute", "lockout", "timing"],
-                ))
+                result.findings.append(
+                    Finding(
+                        title="Potential Account Lockout (Timing Signal)",
+                        description=(
+                            "Response times increased substantially during the "
+                            "credential test loop, which can indicate throttling "
+                            "or progressive lockout."
+                        ),
+                        severity=Severity.INFO,
+                        evidence={
+                            "initial_avg_ms": f"{avg_time:.0f}",
+                            "later_avg_ms": f"{avg_later:.0f}",
+                            "slowdown_factor": f"{avg_later / avg_time:.2f}",
+                        },
+                        remediation=(
+                            "Verify lockout behavior. This is a good security "
+                            "measure; ensure proper duration and user notification."
+                        ),
+                        module_name=self.name,
+                        confidence=0.5,
+                        tags=["brute", "lockout", "timing"],
+                    )
+                )
 
         # FR-BF-006: User enumeration detection (enhanced)
         if len(error_patterns) >= 2:
             unique_errors = len(error_patterns)
             if unique_errors >= 2:
-                result.findings.append(Finding(
-                    title="User Enumeration Possible",
-                    description=(
-                        f"Different error patterns detected ({unique_errors} unique responses), "
-                        "which may allow attackers to enumerate valid usernames."
-                    ),
-                    severity=Severity.MEDIUM,
-                    evidence={
-                        "error_patterns_detected": list(error_patterns.keys()),
-                        "unique_count": unique_errors,
-                    },
-                    remediation="Use a generic error message for all authentication failures "
-                    "(e.g., 'Invalid username or password').",
-                    cwe_id="CWE-204",
-                    module_name=self.name,
-                    confidence=0.7,
-                    tags=["brute", "user-enumeration"],
-                ))
+                result.findings.append(
+                    Finding(
+                        title="User Enumeration Possible",
+                        description=(
+                            f"Different error patterns detected ({unique_errors} unique responses), "
+                            "which may allow attackers to enumerate valid usernames."
+                        ),
+                        severity=Severity.MEDIUM,
+                        evidence={
+                            "error_patterns_detected": list(error_patterns.keys()),
+                            "unique_count": unique_errors,
+                        },
+                        remediation="Use a generic error message for all authentication failures "
+                        "(e.g., 'Invalid username or password').",
+                        cwe_id="CWE-204",
+                        module_name=self.name,
+                        confidence=0.7,
+                        tags=["brute", "user-enumeration"],
+                    )
+                )
 
         # Enhanced: Timing-based enumeration detection
         if len(response_times) >= 3:
@@ -520,34 +540,38 @@ class BruteForce(BaseAttackModule):
             p75_idx = min(len(sorted_times) - 1, 3 * len(sorted_times) // 4)
             iqr = sorted_times[p75_idx] - sorted_times[p25_idx]
             if iqr > 200:  # Significant timing variance (>200ms)
-                result.findings.append(Finding(
-                    title="User Enumeration: Timing-Based Discrepancy",
-                    description=(
-                        f"Response times varied significantly (IQR={iqr:.0f}ms). "
-                        "This may indicate different processing for valid vs. invalid users."
-                    ),
-                    severity=Severity.MEDIUM,
-                    evidence={
-                        "response_time_spread_ms": f"{iqr:.0f}",
-                        "min_ms": f"{sorted_times[0]:.0f}",
-                        "max_ms": f"{sorted_times[-1]:.0f}",
-                    },
-                    remediation="Ensure consistent response times regardless of username validity.",
-                    cwe_id="CWE-204",
-                    module_name=self.name,
-                    confidence=0.5,
-                    tags=["brute", "user-enumeration", "timing"],
-                ))
+                result.findings.append(
+                    Finding(
+                        title="User Enumeration: Timing-Based Discrepancy",
+                        description=(
+                            f"Response times varied significantly (IQR={iqr:.0f}ms). "
+                            "This may indicate different processing for valid vs. invalid users."
+                        ),
+                        severity=Severity.MEDIUM,
+                        evidence={
+                            "response_time_spread_ms": f"{iqr:.0f}",
+                            "min_ms": f"{sorted_times[0]:.0f}",
+                            "max_ms": f"{sorted_times[-1]:.0f}",
+                        },
+                        remediation="Ensure consistent response times regardless of username validity.",
+                        cwe_id="CWE-204",
+                        module_name=self.name,
+                        confidence=0.5,
+                        tags=["brute", "user-enumeration", "timing"],
+                    )
+                )
 
         if not found_valid and result.metadata.get("credentials_tested", 0) > 0:
-            result.findings.append(Finding(
-                title="No Default Credentials Found",
-                description=f"Tested {result.metadata['credentials_tested']} credentials "
-                f"against {form_url}. No weak credentials detected.",
-                severity=Severity.INFO,
-                evidence={"credentials_tested": result.metadata["credentials_tested"]},
-                module_name=self.name,
-                tags=["brute"],
-            ))
+            result.findings.append(
+                Finding(
+                    title="No Default Credentials Found",
+                    description=f"Tested {result.metadata['credentials_tested']} credentials "
+                    f"against {form_url}. No weak credentials detected.",
+                    severity=Severity.INFO,
+                    evidence={"credentials_tested": result.metadata["credentials_tested"]},
+                    module_name=self.name,
+                    tags=["brute"],
+                )
+            )
 
         return result

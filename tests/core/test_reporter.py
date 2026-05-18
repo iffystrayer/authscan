@@ -1,4 +1,5 @@
 """Tests for output reporters."""
+
 from __future__ import annotations
 
 import json
@@ -8,10 +9,8 @@ from auth_scan.core.reporter import (
     HtmlReporter,
     JsonReporter,
     MarkdownReporter,
-    ReportSummary,
     Reporter,
     SarifReporter,
-    TerminalReporter,
     _compute_summary,
 )
 
@@ -53,20 +52,20 @@ class TestJsonReporter:
     def test_json_output_redacted(self, sample_report: ScanReport) -> None:
         from auth_scan.attacks.base import Finding
 
-        sample_report.add_finding(Finding(
-            title="Password in Response",
-            description="Found password field",
-            severity=Severity.HIGH,
-            evidence={"authorization": "Bearer secret-token"},
-            module_name="probe",
-        ))
+        sample_report.add_finding(
+            Finding(
+                title="Password in Response",
+                description="Found password field",
+                severity=Severity.HIGH,
+                evidence={"authorization": "Bearer secret-token"},
+                module_name="probe",
+            )
+        )
         reporter = JsonReporter()
         output = reporter.render(sample_report, redact=True)
         data = json.loads(output)
         # Find the finding with the redacted evidence
-        password_finding = [
-            f for f in data["findings"] if "Password" in f["title"]
-        ]
+        password_finding = [f for f in data["findings"] if "Password" in f["title"]]
         if password_finding:
             evidence = password_finding[0].get("evidence", {})
             auth_val = evidence.get("authorization", "")
@@ -75,13 +74,15 @@ class TestJsonReporter:
     def test_json_output_no_redact(self, sample_report: ScanReport) -> None:
         from auth_scan.attacks.base import Finding
 
-        sample_report.add_finding(Finding(
-            title="Token Found",
-            description="Auth token exposed",
-            severity=Severity.HIGH,
-            evidence={"authorization": "Bearer secret-token"},
-            module_name="probe",
-        ))
+        sample_report.add_finding(
+            Finding(
+                title="Token Found",
+                description="Auth token exposed",
+                severity=Severity.HIGH,
+                evidence={"authorization": "Bearer secret-token"},
+                module_name="probe",
+            )
+        )
         reporter = JsonReporter()
         output = reporter.render(sample_report, redact=False)
         data = json.loads(output)
@@ -177,6 +178,7 @@ class TestReporterIntegration:
         )
         assert result["json"].endswith(".json")
         import os
+
         assert os.path.exists(result["json"])
 
     def test_markdown_saved_to_file(self, sample_report: ScanReport, tmp_path) -> None:

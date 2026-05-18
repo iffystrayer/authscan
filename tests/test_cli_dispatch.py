@@ -9,6 +9,7 @@ real network requests. Each test isolates one contract:
   * H5: ``ScanConfig`` now declares ``jwt_wordlist``, ``no_discovery``,
     ``no_mfa``, ``oauth_scope``, and ``output_file`` (no dynamic attrs).
 """
+
 from __future__ import annotations
 
 import json
@@ -20,8 +21,8 @@ from auth_scan.core.config import ScanConfig
 from auth_scan.core.engine import all_module_names, discover_modules
 from auth_scan.core.reporter import Reporter
 
-
 # ---- H1: canonical module registry -----------------------------------------
+
 
 class TestModuleRegistry:
     def test_discover_modules_returns_built_in_set(self) -> None:
@@ -43,6 +44,7 @@ class TestModuleRegistry:
 
 # ---- H5: ScanConfig fields exist -------------------------------------------
 
+
 class TestScanConfigFields:
     def test_phase2_fields_present_with_safe_defaults(self) -> None:
         cfg = ScanConfig()
@@ -56,12 +58,10 @@ class TestScanConfigFields:
 
     def test_phase2_fields_via_yaml(self, tmp_path) -> None:
         from auth_scan.core.config import load_config
+
         cfg_path = tmp_path / "c.yml"
         cfg_path.write_text(
-            "jwt_wordlist: /tmp/jwt.txt\n"
-            "no_discovery: true\n"
-            "no_mfa: true\n"
-            "oauth_scope: admin\n"
+            "jwt_wordlist: /tmp/jwt.txt\nno_discovery: true\nno_mfa: true\noauth_scope: admin\n"
         )
         cfg = load_config(config_path=str(cfg_path))
         assert cfg.jwt_wordlist == "/tmp/jwt.txt"
@@ -72,16 +72,20 @@ class TestScanConfigFields:
 
 # ---- H2: --output-file routing ---------------------------------------------
 
+
 @pytest.fixture
 def sample_report() -> ScanReport:
     from auth_scan.attacks.base import Finding, Severity
+
     r = ScanReport(target="https://example.com", effective_target="https://example.com")
-    r.add_finding(Finding(
-        title="Sample",
-        severity=Severity.INFO,
-        module_name="probe",
-        description="hello",
-    ))
+    r.add_finding(
+        Finding(
+            title="Sample",
+            severity=Severity.INFO,
+            module_name="probe",
+            description="hello",
+        )
+    )
     return r
 
 
@@ -127,9 +131,7 @@ class TestOutputFileRouting:
         assert target_file.exists()
         assert "auth-scan Security Assessment Report" in target_file.read_text()
 
-    def test_without_output_file_uses_output_dir(
-        self, sample_report: ScanReport, tmp_path
-    ) -> None:
+    def test_without_output_file_uses_output_dir(self, sample_report: ScanReport, tmp_path) -> None:
         rep = Reporter(output_formats=["json"], no_redact=False)
         saved = rep.render(
             sample_report,
@@ -144,6 +146,7 @@ class TestOutputFileRouting:
 
 # ---- H2: CLI flag wiring (uses Click's CliRunner) --------------------------
 
+
 class TestCliWiring:
     def test_output_file_requires_exactly_one_non_terminal_format(self, tmp_path) -> None:
         from click.testing import CliRunner
@@ -152,12 +155,18 @@ class TestCliWiring:
 
         runner = CliRunner()
         # Two non-terminal formats + --output-file should be rejected.
-        result = runner.invoke(main, [
-            "https://example.com",
-            "--output", "json",
-            "--output", "html",
-            "--output-file", str(tmp_path / "x.json"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "https://example.com",
+                "--output",
+                "json",
+                "--output",
+                "html",
+                "--output-file",
+                str(tmp_path / "x.json"),
+            ],
+        )
         assert result.exit_code == 2, result.output
         assert "exactly one --output format" in result.output
 

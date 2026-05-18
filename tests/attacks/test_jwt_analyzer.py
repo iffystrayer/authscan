@@ -1,4 +1,5 @@
 """Tests for the JWT Analyzer attack module."""
+
 from __future__ import annotations
 
 import base64
@@ -59,6 +60,7 @@ class TestJWTAnalyzer:
     def test_alg_none_attacks(self, sample_jwt_none: str) -> None:
         analyzer = JWTAnalyzer()
         from auth_scan.core.session import TokenInfo
+
         token = TokenInfo.from_string(sample_jwt_none)
 
         @responses.activate
@@ -76,13 +78,19 @@ class TestJWTAnalyzer:
     def test_alg_none_rejected(self, sample_jwt_none: str) -> None:
         analyzer = JWTAnalyzer()
         from auth_scan.core.session import TokenInfo
+
         token = TokenInfo.from_string(sample_jwt_none)
 
         @responses.activate
         def run():
             # All endpoints return 401 — server rejects
             for ep in ["/api/profile", "/api/user", "/api/me", "/"]:
-                responses.add(responses.GET, f"https://example.com{ep}", json={"error": "unauthorized"}, status=401)
+                responses.add(
+                    responses.GET,
+                    f"https://example.com{ep}",
+                    json={"error": "unauthorized"},
+                    status=401,
+                )
             client = HTTPClient(base_url="https://example.com", rate_limit=100)
             findings = analyzer._test_alg_none(token, client, "https://example.com")
             assert len(findings) == 0  # No findings when server properly rejects
@@ -92,6 +100,7 @@ class TestJWTAnalyzer:
     def test_expiry_check(self, sample_jwt_token: str) -> None:
         analyzer = JWTAnalyzer()
         from auth_scan.core.session import TokenInfo
+
         token = TokenInfo.from_string(sample_jwt_token)
         findings = analyzer._check_expiry(token)
         # Token has exp=9999999999 (far future)
@@ -101,13 +110,16 @@ class TestJWTAnalyzer:
 
     def test_sensitive_data_check(self) -> None:
         analyzer = JWTAnalyzer()
-        header_b64 = base64.urlsafe_b64encode(
-            json.dumps({"alg": "HS256"}).encode()
-        ).rstrip(b"=").decode()
-        payload_b64 = base64.urlsafe_b64encode(
-            json.dumps({"sub": "admin", "email": "admin@corp.com", "password": "secret"}).encode()
-        ).rstrip(b"=").decode()
+        header_b64 = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=").decode()
+        payload_b64 = (
+            base64.urlsafe_b64encode(
+                json.dumps({"sub": "admin", "email": "admin@corp.com", "password": "secret"}).encode()
+            )
+            .rstrip(b"=")
+            .decode()
+        )
         from auth_scan.core.session import TokenInfo
+
         token = TokenInfo.from_string(f"{header_b64}.{payload_b64}.sig")
         findings = analyzer._check_sensitive_data(token)
         assert len(findings) > 0
@@ -115,15 +127,17 @@ class TestJWTAnalyzer:
 
     def test_check_nbf(self) -> None:
         import time
+
         analyzer = JWTAnalyzer()
-        header_b64 = base64.urlsafe_b64encode(
-            json.dumps({"alg": "HS256"}).encode()
-        ).rstrip(b"=").decode()
+        header_b64 = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=").decode()
         future_nbf = int(time.time()) + 86400 * 30  # 30 days in future
-        payload_b64 = base64.urlsafe_b64encode(
-            json.dumps({"sub": "user", "nbf": future_nbf}).encode()
-        ).rstrip(b"=").decode()
+        payload_b64 = (
+            base64.urlsafe_b64encode(json.dumps({"sub": "user", "nbf": future_nbf}).encode())
+            .rstrip(b"=")
+            .decode()
+        )
         from auth_scan.core.session import TokenInfo
+
         token = TokenInfo.from_string(f"{header_b64}.{payload_b64}.sig")
         findings = analyzer._check_nbf(token)
         # Should have a finding about nbf being in the future
