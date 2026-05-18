@@ -1,6 +1,8 @@
 """HTTP client with session management, retry, proxy, rate limiting, and scope enforcement."""
 from __future__ import annotations
 
+import ipaddress
+import socket
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -12,6 +14,68 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from auth_scan.core.exceptions import HttpError, ScopeError
+
+# Maximum number of redirects we will follow manually. Mirrors the requests
+# default but lets us re-check scope between hops.
+MAX_REDIRECTS = 10
+
+# Cloud metadata endpoints — IMDS (AWS / GCP / Azure / DigitalOcean / Alibaba).
+# Any redirect to these hosts is a strong SSRF signal and is always blocked.
+CLOUD_METADATA_HOSTS = frozenset({
+    "169.254.169.254",       # AWS / GCP / Azure / DO / OCI / Alibaba
+    "metadata.google.internal",
+    "metadata.azure.com",
+    "instance-data",
+    "fd00:ec2::254",          # AWS IMDSv2 IPv6
+})
+
+
+def _is_private_or_metadata_host(host: str) -> bool:
+    """Return True if `host` resolves to a private, loopback, link-local,
+    or cloud-metadata address. Used to block SSRF via redirect.
+
+    Pure-name matches (CLOUD_METADATA_HOSTS) short-circuit DNS. Otherwise
+    we rely on `ipaddress` for literal IPs and `socket.getaddrinfo` for
+    names. DNS failures are treated as *not* private — the subsequent
+    request will fail loudly on its own.
+    """
+    if not host:
+        return False
+    if host.lower() in CLOUD_METADATA_HOSTS:
+        return True
+    # Strip brackets from IPv6 literals.
+    candidate = host.strip("[]")
+    try:
+        ip = ipaddress.ip_address(candidate)
+    except ValueError:
+        # Hostname — resolve and check all returned addresses.
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except OSError:
+            return False
+        for info in infos:
+            sockaddr = info[4]
+            addr = sockaddr[0]
+            try:
+                resolved = ipaddress.ip_address(addr)
+            except ValueError:
+                continue
+            if _ip_is_blocked(resolved):
+                return True
+        return False
+    return _ip_is_blocked(ip)
+
+
+def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True for loopback / link-local / private / reserved / multicast."""
+    return (
+        ip.is_loopback
+        or ip.is_link_local
+        or ip.is_private
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
 
 
 @dataclass
@@ -147,9 +211,11 @@ class HTTPClient:
         user_agent: str = "auth-scan/0.1.0",
         cookies: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
+        allow_private_redirects: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.allow_private_redirects = allow_private_redirects
 
         self.session = requests.Session()
         self.rate_limiter = RateLimiter(rate=rate_limit)
@@ -206,6 +272,71 @@ class HTTPClient:
         if not self.scope_enforcer.is_allowed(url):
             raise ScopeError(f"Request blocked by scope enforcement: {url}")
 
+    def _check_redirect_target(self, url: str) -> None:
+        """Validate a redirect target before following it.
+
+        Raises ScopeError if the destination is out of the configured scope
+        or, by default, resolves to a private / loopback / link-local /
+        cloud-metadata address. Set ``allow_private_redirects=True`` on the
+        client to disable the private-address check (useful when scanning
+        an internal target on purpose).
+        """
+        self._check_scope(url)
+        if self.allow_private_redirects:
+            return
+        host = urlparse(url).hostname or ""
+        if _is_private_or_metadata_host(host):
+            raise ScopeError(
+                f"Refusing to follow redirect to private/metadata host: {url}"
+            )
+
+    def _follow_redirects(
+        self,
+        response: requests.Response,
+        method: str,
+        request_kwargs: dict[str, Any],
+    ) -> tuple[requests.Response, list[str]]:
+        """Follow redirects manually, checking scope at every hop.
+
+        Returns (final_response, redirect_chain). The chain is a list of
+        ``"from -> to"`` strings for the report. Each hop is rate-limited
+        and goes through _check_redirect_target. RFC 7231/7538 semantics
+        for status codes apply: 301/302/303 demote POST→GET, 307/308
+        preserve the method.
+        """
+        chain: list[str] = []
+        hops = 0
+        while response.is_redirect or response.is_permanent_redirect:
+            if hops >= MAX_REDIRECTS:
+                raise HttpError(
+                    f"Exceeded max redirects ({MAX_REDIRECTS}); last URL: {response.url}"
+                )
+            location = response.headers.get("Location")
+            if not location:
+                break
+            next_url = urljoin(response.url, location)
+            self._check_redirect_target(next_url)
+            chain.append(f"{response.url} -> {next_url}")
+
+            # RFC 7231 §6.4.{2,3,4}: 301/302/303 should switch to GET and
+            # drop the body. 307/308 preserve method and body.
+            next_method = method
+            next_kwargs = dict(request_kwargs)
+            if response.status_code in (301, 302, 303):
+                next_method = "GET"
+                next_kwargs.pop("data", None)
+                next_kwargs.pop("json", None)
+
+            self.rate_limiter.acquire()
+            response = self.session.request(
+                method=next_method,
+                url=next_url,
+                allow_redirects=False,
+                **next_kwargs,
+            )
+            hops += 1
+        return response, chain
+
     def _record_request(
         self,
         request_id: str,
@@ -242,7 +373,12 @@ class HTTPClient:
         timeout: int | None = None,
         **kwargs: Any,
     ) -> requests.Response:
-        """Make an HTTP request with rate limiting and scope enforcement."""
+        """Make an HTTP request with rate limiting and scope enforcement.
+
+        Redirects are followed manually so we can re-check scope and block
+        private/loopback/cloud-metadata targets between hops. Pass
+        ``allow_redirects=False`` to disable redirect-following entirely.
+        """
         url = self._build_url(path)
         request_id = self._generate_request_id()
 
@@ -257,18 +393,24 @@ class HTTPClient:
         if headers:
             req_headers.update(headers)
 
+        request_kwargs: dict[str, Any] = {
+            "data": data,
+            "json": json,
+            "headers": req_headers,
+            "timeout": timeout or self.timeout,
+            **kwargs,
+        }
+
         start_time = time.monotonic()
         try:
             response = self.session.request(
                 method=method,
                 url=url,
-                data=data,
-                json=json,
-                headers=req_headers,
-                allow_redirects=allow_redirects,
-                timeout=timeout or self.timeout,
-                **kwargs,
+                allow_redirects=False,
+                **request_kwargs,
             )
+            if allow_redirects:
+                response, _chain = self._follow_redirects(response, method, request_kwargs)
             duration_ms = (time.monotonic() - start_time) * 1000
             self._record_request(request_id, method, url, response=response, duration_ms=duration_ms)
             return response
@@ -313,17 +455,30 @@ class HTTPClient:
 
         start_time = time.monotonic()
         try:
-            # Direct request to base_url to avoid urljoin quirks
+            # Direct request to base_url to avoid urljoin quirks. We disable
+            # automatic redirect-following on the underlying session and
+            # follow manually so each hop goes through scope/private-host
+            # checks (C5).
+            self._check_scope(url)
             self.rate_limiter.acquire()
-            response = self.session.get(url, timeout=self.timeout, allow_redirects=True)
+            response = self.session.get(url, timeout=self.timeout, allow_redirects=False)
+            response, manual_chain = self._follow_redirects(
+                response, "GET", {"timeout": self.timeout}
+            )
+            redirect_chain.extend(manual_chain)
         except HttpError:
             # Try HTTP fallback
             if url.startswith("https://"):
                 fallback = url.replace("https://", "http://", 1)
+                self._check_scope(fallback)
                 self.rate_limiter.acquire()
                 try:
-                    response = self.session.get(fallback, timeout=self.timeout)
+                    response = self.session.get(fallback, timeout=self.timeout, allow_redirects=False)
+                    response, manual_chain = self._follow_redirects(
+                        response, "GET", {"timeout": self.timeout}
+                    )
                     redirect_chain.append(f"{url} -> {fallback}")
+                    redirect_chain.extend(manual_chain)
                     final_url = fallback
                 except Exception as e:
                     raise HttpError(f"Failed to probe target: {url} - {e}") from e
@@ -331,9 +486,6 @@ class HTTPClient:
                 raise
 
         final_url = response.url
-        if response.history:
-            for r in response.history:
-                redirect_chain.append(f"{r.url} -> {r.headers.get('Location', 'unknown')}")
 
         # Extract forms
         forms: list[dict[str, Any]] = []
