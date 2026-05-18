@@ -127,12 +127,18 @@ class OAuthTester(BaseAttackModule):
             if any(kw in key.lower() or kw in str(value).lower() for kw in OAUTH_KEYWORDS):
                 endpoints["detected_in_headers"] = key
 
-        # Check page source for oauth links
+        # Check page source for oauth links. Previously the optional quote
+        # character was being captured as group 1 and used as the dict key,
+        # so discovered endpoints landed under "" / "'" / '"' and were never
+        # consumed by downstream tests. Capture the endpoint *name* and the
+        # URL as named groups, tolerating both JSON (`"name": "url"`) and
+        # JavaScript (`name = url` or `name: 'url'`) forms.
         for match in re.finditer(
-            r'(?:authorization_endpoint|token_endpoint|userinfo_endpoint|issuer)["\s:=]+(["\']?)(https?://[^\s"\'<,]+)',
+            r"(?P<name>authorization_endpoint|token_endpoint|userinfo_endpoint|issuer)"
+            r'["\']?\s*[:=]\s*["\']?(?P<url>https?://[^\s"\'<,]+)',
             probe_body,
         ):
-            endpoints[match.group(1).strip("\"'")] = match.group(2).strip("\"'")
+            endpoints[match.group("name")] = match.group("url").rstrip(",;)")
 
         # Check well-known paths
         for well_known in OAUTH_WELL_KNOWN_PATHS:
@@ -434,7 +440,12 @@ class OAuthTester(BaseAttackModule):
         if not auth_url:
             return findings
 
-        escalated_scopes = getattr(config, "oauth_scope", "admin%20profile%20email%20openid")
+        # Plain-text scope. The previous default was pre-URL-encoded
+        # ("admin%20profile..."), which then got URL-encoded again by
+        # ``requests`` into "admin%2520..." — corrupting the request and
+        # producing both false negatives (server rejects the malformed
+        # value) and false positives (server echoes it back unchanged).
+        escalated_scopes = getattr(config, "oauth_scope", "admin profile email openid")
         if isinstance(escalated_scopes, str) and not escalated_scopes:
             escalated_scopes = "admin profile email openid"
 
