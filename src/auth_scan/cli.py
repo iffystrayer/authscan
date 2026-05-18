@@ -9,7 +9,7 @@ import click
 
 from auth_scan import __version__
 from auth_scan.core.config import ScanConfig, generate_default_config, load_config
-from auth_scan.core.engine import run_assessment
+from auth_scan.core.engine import all_module_names, run_assessment
 from auth_scan.core.exceptions import AuthScanError, ConfigError
 from auth_scan.core.reporter import Reporter
 
@@ -181,6 +181,16 @@ class AuthScanCommand(click.Command):
     help="Directory for file-based output (default: ./scan-results).",
 )
 @click.option(
+    "--output-file",
+    type=click.Path(dir_okay=False, writable=True, allow_dash=True),
+    default=None,
+    help=(
+        "Write a single report to this exact path (or '-' for stdout). "
+        "Requires exactly one --output format other than 'terminal'. "
+        "Overrides --output-dir for that format."
+    ),
+)
+@click.option(
     "--init",
     "init_config",
     is_flag=True,
@@ -242,6 +252,7 @@ def main(
     no_verify: bool,
     ca_bundle: Optional[str],
     output_dir: str,
+    output_file: Optional[str],
     init_config: bool,
     jwt_wordlist: Optional[str],
     no_discovery: bool,
@@ -297,11 +308,13 @@ def main(
         config.target = target
         config.quick = quick or config.quick
         config.output_dir = output_dir
+        if output_file is not None:
+            config.output_file = output_file
 
         if modules:
             config.modules = list(modules)
         if "all" in config.modules:
-            config.modules = ["probe", "jwt", "session", "brute"]
+            config.modules = all_module_names()
 
         if output_formats and output_formats != ("terminal",):
             config.output_formats = list(output_formats)
@@ -395,6 +408,17 @@ def main(
         click.echo(f"Unexpected error: {e}", err=True)
         sys.exit(255)
 
+    # Validate --output-file usage. It only makes sense with exactly one
+    # non-terminal format (you can't write JSON + HTML to one file).
+    non_terminal = [f for f in config.output_formats if f != "terminal"]
+    if config.output_file and len(non_terminal) != 1:
+        click.echo(
+            "Error: --output-file requires exactly one --output format "
+            f"other than 'terminal' (got: {non_terminal or ['(none)']}).",
+            err=True,
+        )
+        sys.exit(2)
+
     # Generate reports
     reporter = Reporter(
         output_formats=config.output_formats,
@@ -406,6 +430,7 @@ def main(
         endpoints_tested=0,  # TODO: track from engine
         output_dir=config.output_dir,
         target=config.target,
+        output_file=config.output_file or None,
     )
 
     # Print file output paths

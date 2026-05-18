@@ -10,17 +10,21 @@ auth-scan is a CLI-first, protocol-agnostic authentication security scanner that
 ## Quick Start
 
 ```bash
-# Install
-pip install auth-scan
+# Install (uv recommended)
+uv tool install auth-scan
+# or: pip install auth-scan
 
 # Run a quick scan
 auth-scan https://example.com --quick
 
-# Full scan with all modules
-auth-scan https://example.com
+# Full scan with every registered module (built-ins + plugins)
+auth-scan https://example.com --modules all
 
-# JSON output for CI/CD
+# JSON output to a specific file for CI/CD
 auth-scan https://example.com --output json --output-file results.json
+
+# Stream a single-format report to stdout (useful for pipes)
+auth-scan https://example.com --output sarif --output-file -
 ```
 
 ## Features
@@ -41,7 +45,9 @@ auth-scan <TARGET> [OPTIONS]
 TARGET is the URL to scan (e.g., https://example.com).
 
 Options:
-  --modules TEXT...        Modules to run: probe, jwt, session, brute (default: all)
+  --modules TEXT...        Modules to run: probe, jwt, session, brute,
+                           oauth, mfa, websocket, api_key, or 'all'
+                           (expands to every registered module).
   --output, -o FORMAT...   Output: terminal, json, markdown, html, pdf, sarif
   --config, -c PATH        YAML config file
   --profile, -P NAME       Named profile from config
@@ -59,10 +65,28 @@ Options:
   --quiet, -q              Minimal output
   --no-color               Disable colored output
   --no-redact              Show secrets in output (DANGEROUS)
+  --output-dir PATH        Directory for auto-named report files
+                           (default: ./scan-results)
+  --output-file PATH       Write a single report to this exact path
+                           (or '-' for stdout). Requires exactly one
+                           non-terminal --output format.
   --init                   Generate default config file
   --version                Show version
   --help                   Show this help
 ```
+
+### Reporters
+
+| `--output` value | Extension | Single-file via `--output-file` | Notes |
+|---|---|---|---|
+| `terminal` | (stdout)      | n/a | Default; Rich-formatted summary table. |
+| `json`     | `.json`       | ✅  | Machine-readable. Redaction by default. |
+| `markdown` | `.md`         | ✅  | Consultant-style write-up. |
+| `html`     | `.html`       | ✅  | Standalone HTML (embedded CSS). |
+| `pdf`      | `.pdf`        | ✅  | Requires `auth-scan[pdf]` extra (WeasyPrint). |
+| `sarif`    | `.sarif.json` | ✅  | GitHub Code Scanning / SonarQube compatible. |
+
+Use `--output-file -` with a single non-terminal format to pipe to stdout.
 
 ## Configuration
 

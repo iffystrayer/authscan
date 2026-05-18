@@ -16,8 +16,13 @@ from auth_scan.core.session import check_security_headers
 
 
 # Module discovery via entry_points (Phase 2 plugin system)
-def _discover_modules() -> dict[str, type[BaseAttackModule]]:
-    """Discover all available modules via entry_points and built-in fallback."""
+def discover_modules() -> dict[str, type[BaseAttackModule]]:
+    """Discover all available attack modules via entry_points + built-in fallback.
+
+    Returns a name → class map, e.g. ``{"jwt": JWTAnalyzer, ...}``. Plugins
+    that register the same name as a built-in override the built-in.
+    This is the single canonical registry; CLI and engine both consult it.
+    """
     modules: dict[str, type[BaseAttackModule]] = {}
 
     # Try entry_points first (supports external plugins)
@@ -53,6 +58,24 @@ def _discover_modules() -> dict[str, type[BaseAttackModule]]:
                 modules[cls.name] = cls
 
     return modules
+
+
+def all_module_names() -> list[str]:
+    """Return the canonical module name list for ``--modules all``.
+
+    Includes ``probe`` (always-on lifecycle phase) plus every name
+    returned by :func:`discover_modules`, deduped, ordered with ``probe``
+    first.
+    """
+    names = ["probe"]
+    for name in discover_modules().keys():
+        if name not in names:
+            names.append(name)
+    return names
+
+
+# Backwards-compatible alias for code that imported the private name.
+_discover_modules = discover_modules
 
 
 class ScanEngine:

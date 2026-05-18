@@ -133,6 +133,17 @@ class ScanConfig:
     # Wordlists
     wordlist: str = ""
     user_wordlist: str = ""
+    jwt_wordlist: str = ""
+
+    # Phase-2 module toggles
+    no_discovery: bool = False
+    no_mfa: bool = False
+
+    # OAuth scope-escalation value (plain text, requests will URL-encode)
+    oauth_scope: str = "admin profile email openid"
+
+    # Single-file output (companion to output_formats); empty means use output_dir
+    output_file: str = ""
 
     # Agentic
     agentic: bool = False
@@ -299,8 +310,9 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
     simple_fields = [
         "target", "rate_limit", "timeout", "user_agent", "proxy",
         "no_verify", "ca_bundle", "no_redact", "no_color", "verbose", "quiet",
-        "wordlist", "user_wordlist", "agentic", "max_depth",
+        "wordlist", "user_wordlist", "jwt_wordlist", "agentic", "max_depth",
         "confidence_threshold", "resume_scan_id", "quick",
+        "no_discovery", "no_mfa", "oauth_scope", "output_file",
     ]
     for field_name in simple_fields:
         if field_name in d:
