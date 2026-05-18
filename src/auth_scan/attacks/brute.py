@@ -239,6 +239,14 @@ class BruteForce(BaseAttackModule):
         found_valid = False
         consecutive_429 = 0
         lockout_detected = False
+        # Substrings (case-insensitive) that indicate account lockout in
+        # the response body. We snapshot any one that fires for the
+        # finding's evidence.
+        lockout_body_keywords = (
+            "locked", "suspended", "disabled", "too many attempts",
+            "account is locked", "account has been locked",
+        )
+        lockout_signal: dict[str, Any] | None = None
 
         def test_single(creds: tuple[str, str]) -> dict[str, Any] | None:
             nonlocal lockout_detected
@@ -283,6 +291,23 @@ class BruteForce(BaseAttackModule):
 
             result.metadata["credentials_tested"] = i + 1
             response_times.append(entry["duration_ms"])
+
+            # FR-BF-004: Lockout detection (in-loop). HTTP 423 (Locked) is
+            # the unambiguous signal; otherwise look for explicit lockout
+            # phrases in the response body. Either trips lockout_detected
+            # so the loop terminates immediately.
+            body_for_lockout = entry["body_preview"]
+            matched_keyword = next(
+                (kw for kw in lockout_body_keywords if kw in body_for_lockout), None
+            )
+            if entry["status"] == 423 or matched_keyword is not None:
+                lockout_detected = True
+                lockout_signal = {
+                    "status": entry["status"],
+                    "matched_keyword": matched_keyword,
+                    "credentials_tested": i + 1,
+                }
+                break
 
             # FR-BF-005: Rate limit detection
             if entry["status"] == 429:
@@ -347,27 +372,64 @@ class BruteForce(BaseAttackModule):
 
             time.sleep(0.05)  # Minimal delay between requests (rate limiter handles rest)
 
-        # FR-BF-004: Lockout detection
-        if response_times:
-            avg_time = sum(response_times[:10]) / min(10, len(response_times))
-            later_times = response_times[-5:] if len(response_times) >= 10 else response_times
-            avg_later = sum(later_times) / len(later_times)
-            if avg_later < avg_time * 0.3:  # Significant speedup might indicate lockout
+        # FR-BF-004: Lockout detection.
+        # 1) Definitive in-loop signal (HTTP 423 or body keyword) fires first.
+        # 2) Otherwise, fall back to a post-hoc timing heuristic: responses
+        #    slowing down significantly is a soft indicator that the server
+        #    is throttling or queuing further attempts. (The old code
+        #    looked for *speed-up* which would never occur for real
+        #    lockout — that was inverted.)
+        if lockout_signal is not None:
+            evidence: dict[str, Any] = {
+                "status": lockout_signal["status"],
+                "credentials_tested": lockout_signal["credentials_tested"],
+            }
+            kw = lockout_signal["matched_keyword"]
+            if kw is not None:
+                evidence["matched_keyword"] = kw
+            result.findings.append(Finding(
+                title="Account Lockout Detected",
+                description=(
+                    "Authentication endpoint reported a lockout response "
+                    f"(status={lockout_signal['status']}"
+                    + (f", keyword='{kw}'" if kw else "")
+                    + ")."
+                ),
+                severity=Severity.INFO,
+                evidence=evidence,
+                remediation=(
+                    "Lockout is a good defense; ensure the policy avoids "
+                    "permanent denial-of-service for legitimate users "
+                    "(time-bounded lockouts, notification, CAPTCHA, etc.)."
+                ),
+                module_name=self.name,
+                confidence=0.95,
+                tags=["brute", "lockout"],
+            ))
+        elif response_times and len(response_times) >= 10:
+            avg_time = sum(response_times[:10]) / 10
+            avg_later = sum(response_times[-5:]) / 5
+            if avg_later > avg_time * 1.5:
                 result.findings.append(Finding(
-                    title="Potential Account Lockout Detected",
+                    title="Potential Account Lockout (Timing Signal)",
                     description=(
-                        "Response times decreased significantly after multiple attempts, "
-                        "which may indicate account lockout is occurring."
+                        "Response times increased substantially during the "
+                        "credential test loop, which can indicate throttling "
+                        "or progressive lockout."
                     ),
                     severity=Severity.INFO,
                     evidence={
                         "initial_avg_ms": f"{avg_time:.0f}",
                         "later_avg_ms": f"{avg_later:.0f}",
+                        "slowdown_factor": f"{avg_later / avg_time:.2f}",
                     },
-                    remediation="Verify account lockout behavior. This is a good security measure, "
-                    "but ensure proper lockout duration and user notification.",
+                    remediation=(
+                        "Verify lockout behavior. This is a good security "
+                        "measure; ensure proper duration and user notification."
+                    ),
                     module_name=self.name,
-                    tags=["brute", "lockout"],
+                    confidence=0.5,
+                    tags=["brute", "lockout", "timing"],
                 ))
 
         # FR-BF-006: User enumeration detection (enhanced)
