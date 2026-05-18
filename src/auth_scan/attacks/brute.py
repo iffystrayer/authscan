@@ -79,6 +79,9 @@ class BruteForce(BaseAttackModule):
     version = "1.0.0"
     priority = 30
 
+    # Set in run() from config.no_redact. Default redacts (safe).
+    _no_redact: bool = False
+
     def run(
         self,
         target: str,
@@ -87,6 +90,10 @@ class BruteForce(BaseAttackModule):
         config: Any,
     ) -> ModuleResult:
         result = ModuleResult()
+
+        # Track redaction mode from config so evidence dicts can honor --no-redact.
+        # Default to redacted when the attribute is absent.
+        self._no_redact: bool = bool(getattr(config, "no_redact", False))
 
         # FR-BF-001: Discover login forms
         login_forms = self._discover_login_forms(report)
@@ -202,6 +209,34 @@ class BruteForce(BaseAttackModule):
             pass
         return entries
 
+    def _fetch_hidden_fields(
+        self, http_client: Any, form_page_url: str,
+    ) -> dict[str, str] | None:
+        """Re-fetch the login page and parse a fresh set of hidden inputs.
+
+        Returns a name→value dict, or None if the request failed. CSRF
+        tokens are per-request on many frameworks (Django, Rails), so we
+        cannot reuse the values captured at probe time across attempts.
+        """
+        try:
+            from bs4 import BeautifulSoup
+            resp = http_client.get(form_page_url)
+        except Exception:
+            return None
+        if resp.status_code >= 400:
+            return None
+        try:
+            soup = BeautifulSoup(resp.text, "lxml")
+        except Exception:
+            return None
+        fresh: dict[str, str] = {}
+        for inp in soup.find_all("input"):
+            if inp.get("type", "").lower() == "hidden":
+                name = inp.get("name")
+                if name:
+                    fresh[name] = inp.get("value", "")
+        return fresh
+
     def _test_form(
         self,
         form: dict[str, Any],
@@ -216,6 +251,9 @@ class BruteForce(BaseAttackModule):
         username_field = form["username_field"]
         password_field = form["password_field"]
         hidden_fields = form.get("hidden_fields", [])
+        # URL we GET to refresh CSRF tokens. Falls back to the action URL
+        # if the form metadata didn't capture the page URL separately.
+        form_page_url = form.get("page_url") or form.get("action", "") or target
 
         # Build full action URL
         if action.startswith(("http://", "https://")):
@@ -232,25 +270,59 @@ class BruteForce(BaseAttackModule):
         found_valid = False
         consecutive_429 = 0
         lockout_detected = False
+        # Substrings (case-insensitive) that indicate account lockout in
+        # the response body. We snapshot any one that fires for the
+        # finding's evidence.
+        lockout_body_keywords = (
+            "locked", "suspended", "disabled", "too many attempts",
+            "account is locked", "account has been locked",
+        )
+        lockout_signal: dict[str, Any] | None = None
 
-        def test_single(creds: tuple[str, str]) -> dict[str, Any] | None:
+        # Static fallback fields captured at probe time. Used only when a
+        # fresh GET fails. CSRF-protected forms need the per-request token
+        # refresh below; static reuse causes silent 403/redirect failures.
+        static_hidden = {hf["name"]: hf["value"] for hf in hidden_fields}
+
+        def test_single(
+            creds: tuple[str, str], stale_csrf: bool = False,
+        ) -> dict[str, Any] | None:
+            """Issue one credential attempt. Refreshes hidden form fields
+            on every call (so CSRF tokens are valid) and re-fetches once
+            more if the caller signals the previous attempt looked stale.
+            """
             nonlocal lockout_detected
             if lockout_detected:
                 return None
 
             username, password = creds
+            fresh = self._fetch_hidden_fields(http_client, form_page_url)
+            if fresh is None:
+                fresh = dict(static_hidden)
+
             data: dict[str, str] = {username_field: username, password_field: password}
-            for hf in hidden_fields:
-                data[hf["name"]] = hf["value"]
+            data.update(fresh)
 
             start = time.monotonic()
             try:
                 if method == "POST":
                     resp = http_client.post(form_url, data=data)
                 else:
-                    resp = http_client.get(f"{form_url}?{username_field}={username}&{password_field}={password}")
+                    resp = http_client.get(
+                        f"{form_url}?{username_field}={username}&{password_field}={password}"
+                    )
 
                 elapsed = (time.monotonic() - start) * 1000
+                # Stale-CSRF detection: a 403 or redirect back to the login
+                # page after a POST is the canonical "your token expired"
+                # signal. We refresh and retry exactly once per attempt.
+                looks_stale = (
+                    resp.status_code == 403
+                    or (resp.status_code in (301, 302) and "login" in (resp.headers.get("Location", "").lower()))
+                )
+                if looks_stale and not stale_csrf and method == "POST":
+                    return test_single(creds, stale_csrf=True)
+
                 return {
                     "username": username,
                     "password": password,
@@ -259,6 +331,7 @@ class BruteForce(BaseAttackModule):
                     "body_preview": resp.text[:200].lower(),
                     "headers": dict(resp.headers),
                     "duration_ms": elapsed,
+                    "csrf_retried": stale_csrf,
                 }
             except Exception:
                 return None
@@ -276,6 +349,23 @@ class BruteForce(BaseAttackModule):
 
             result.metadata["credentials_tested"] = i + 1
             response_times.append(entry["duration_ms"])
+
+            # FR-BF-004: Lockout detection (in-loop). HTTP 423 (Locked) is
+            # the unambiguous signal; otherwise look for explicit lockout
+            # phrases in the response body. Either trips lockout_detected
+            # so the loop terminates immediately.
+            body_for_lockout = entry["body_preview"]
+            matched_keyword = next(
+                (kw for kw in lockout_body_keywords if kw in body_for_lockout), None
+            )
+            if entry["status"] == 423 or matched_keyword is not None:
+                lockout_detected = True
+                lockout_signal = {
+                    "status": entry["status"],
+                    "matched_keyword": matched_keyword,
+                    "credentials_tested": i + 1,
+                }
+                break
 
             # FR-BF-005: Rate limit detection
             if entry["status"] == 429:
@@ -309,13 +399,16 @@ class BruteForce(BaseAttackModule):
 
             if entry["status"] in (200, 302) and not is_error:
                 found_valid = True
+                password_for_description = creds[1] if self._no_redact else "[REDACTED]"
                 result.findings.append(Finding(
                     title="Weak/Default Credentials Accepted",
-                    description=f"Login succeeded with credentials: {creds[0]}:{creds[1]}",
+                    description=(
+                        f"Login succeeded with credentials: {creds[0]}:{password_for_description}"
+                    ),
                     severity=Severity.CRITICAL,
                     evidence={
                         "username": creds[0],
-                        "password": "[REDACTED]" if not getattr(self, "_no_redact", True) else creds[1],
+                        "password": creds[1] if self._no_redact else "[REDACTED]",
                         "status": entry["status"],
                         "body_preview": entry["body_preview"][:200],
                         "form_url": form_url,
@@ -337,27 +430,64 @@ class BruteForce(BaseAttackModule):
 
             time.sleep(0.05)  # Minimal delay between requests (rate limiter handles rest)
 
-        # FR-BF-004: Lockout detection
-        if response_times:
-            avg_time = sum(response_times[:10]) / min(10, len(response_times))
-            later_times = response_times[-5:] if len(response_times) >= 10 else response_times
-            avg_later = sum(later_times) / len(later_times)
-            if avg_later < avg_time * 0.3:  # Significant speedup might indicate lockout
+        # FR-BF-004: Lockout detection.
+        # 1) Definitive in-loop signal (HTTP 423 or body keyword) fires first.
+        # 2) Otherwise, fall back to a post-hoc timing heuristic: responses
+        #    slowing down significantly is a soft indicator that the server
+        #    is throttling or queuing further attempts. (The old code
+        #    looked for *speed-up* which would never occur for real
+        #    lockout — that was inverted.)
+        if lockout_signal is not None:
+            evidence: dict[str, Any] = {
+                "status": lockout_signal["status"],
+                "credentials_tested": lockout_signal["credentials_tested"],
+            }
+            kw = lockout_signal["matched_keyword"]
+            if kw is not None:
+                evidence["matched_keyword"] = kw
+            result.findings.append(Finding(
+                title="Account Lockout Detected",
+                description=(
+                    "Authentication endpoint reported a lockout response "
+                    f"(status={lockout_signal['status']}"
+                    + (f", keyword='{kw}'" if kw else "")
+                    + ")."
+                ),
+                severity=Severity.INFO,
+                evidence=evidence,
+                remediation=(
+                    "Lockout is a good defense; ensure the policy avoids "
+                    "permanent denial-of-service for legitimate users "
+                    "(time-bounded lockouts, notification, CAPTCHA, etc.)."
+                ),
+                module_name=self.name,
+                confidence=0.95,
+                tags=["brute", "lockout"],
+            ))
+        elif response_times and len(response_times) >= 10:
+            avg_time = sum(response_times[:10]) / 10
+            avg_later = sum(response_times[-5:]) / 5
+            if avg_later > avg_time * 1.5:
                 result.findings.append(Finding(
-                    title="Potential Account Lockout Detected",
+                    title="Potential Account Lockout (Timing Signal)",
                     description=(
-                        "Response times decreased significantly after multiple attempts, "
-                        "which may indicate account lockout is occurring."
+                        "Response times increased substantially during the "
+                        "credential test loop, which can indicate throttling "
+                        "or progressive lockout."
                     ),
                     severity=Severity.INFO,
                     evidence={
                         "initial_avg_ms": f"{avg_time:.0f}",
                         "later_avg_ms": f"{avg_later:.0f}",
+                        "slowdown_factor": f"{avg_later / avg_time:.2f}",
                     },
-                    remediation="Verify account lockout behavior. This is a good security measure, "
-                    "but ensure proper lockout duration and user notification.",
+                    remediation=(
+                        "Verify lockout behavior. This is a good security "
+                        "measure; ensure proper duration and user notification."
+                    ),
                     module_name=self.name,
-                    tags=["brute", "lockout"],
+                    confidence=0.5,
+                    tags=["brute", "lockout", "timing"],
                 ))
 
         # FR-BF-006: User enumeration detection (enhanced)

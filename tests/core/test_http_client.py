@@ -1,6 +1,7 @@
 """Tests for HTTP client."""
 from __future__ import annotations
 
+import pytest
 import responses
 
 from auth_scan.core.http_client import HTTPClient, RateLimiter, ScopeEnforcer
@@ -159,3 +160,49 @@ class TestHTTPClient:
         assert len(client.request_history) == 2
         assert client.request_history[0].status_code == 200
         assert client.request_history[1].status_code == 200
+
+
+class TestProbeDuration:
+    """C2 regression: probe() must measure elapsed time, not always ~0ms."""
+
+    @responses.activate
+    def test_probe_duration_reflects_elapsed_time(self, monkeypatch) -> None:
+        """duration_ms is computed from a start captured before the GET."""
+        responses.add(
+            responses.GET,
+            "https://example.com",
+            body="<html><body>hi</body></html>",
+            status=200,
+        )
+
+        # Stub time.monotonic deterministically. Call order inside probe():
+        #   1. start_time = time.monotonic()    -> 1.000
+        #   2. rate_limiter.acquire() reads now -> 1.000 (no wait, rate=1000)
+        #   3. duration_ms uses time.monotonic()-> 1.250
+        # The RateLimiter's __post_init__ also reads once during HTTPClient
+        # construction (-> 0.0), and the rate-limit branch in probe's acquire
+        # would not call monotonic again because tokens are available.
+        ticks = iter([0.0, 1.000, 1.000, 1.250])
+        import auth_scan.core.http_client as http_mod
+        monkeypatch.setattr(http_mod.time, "monotonic", lambda: next(ticks))
+
+        client = HTTPClient(base_url="https://example.com", rate_limit=1000.0)
+        probe = client.probe()
+        # 1.250 - 1.000 = 0.250s = 250ms
+        assert probe.duration_ms == pytest.approx(250.0, abs=1.0)
+
+    @responses.activate
+    def test_probe_duration_is_non_negative_in_normal_flow(self) -> None:
+        """Sanity: real (non-mocked-clock) probe yields a finite, non-negative duration."""
+        responses.add(
+            responses.GET,
+            "https://example.com",
+            body="<html></html>",
+            status=200,
+        )
+        client = HTTPClient(base_url="https://example.com", rate_limit=1000.0)
+        probe = client.probe()
+        assert probe.duration_ms >= 0.0
+        # The pre-fix bug always produced ~0; we expect at least *some* time
+        # to elapse for a real responses-mocked round-trip. Loose bound:
+        assert probe.duration_ms < 60_000.0

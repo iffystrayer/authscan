@@ -1,6 +1,8 @@
 """Base classes and data models for attack modules."""
 from __future__ import annotations
 
+import hashlib
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -88,18 +90,27 @@ class Finding:
     request_id: str | None = None
 
     def to_dict(self, redact: bool = True) -> dict[str, Any]:
-        """Serialize to dict, optionally redacting sensitive values."""
-        evidence = self.evidence
+        """Serialize to dict, optionally redacting sensitive values.
+
+        When ``redact`` is True we also scrub token-shaped values out of the
+        free-text ``description`` and ``remediation`` fields, since modules
+        commonly interpolate found secrets into those strings.
+        """
+        evidence: Any = self.evidence
+        description = self.description
+        remediation = self.remediation
         if redact:
             evidence = _redact_dict(evidence.copy())
+            description = _redact_value(description)
+            remediation = _redact_value(remediation)
 
         return {
             "id": self.id,
             "title": self.title,
             "severity": self.severity.value,
-            "description": self.description,
+            "description": description,
             "evidence": evidence,
-            "remediation": self.remediation,
+            "remediation": remediation,
             "cwe_id": self.cwe_id,
             "cvss_score": self.cvss_score,
             "module_name": self.module_name,
@@ -205,7 +216,15 @@ class ScanReport:
         return highest.exit_code
 
     def to_dict(self, redact: bool = True) -> dict[str, Any]:
-        """Serialize the full report to a dict."""
+        """Serialize the full report to a dict.
+
+        When redact=True, metadata is recursively scrubbed and a large
+        ``probe_body`` is replaced with a bounded preview plus length/hash
+        so the raw page never reaches downstream artifacts.
+        """
+        metadata = _summarize_probe_body(self.metadata) if redact else self.metadata
+        if redact:
+            metadata = _redact_dict(metadata)
         return {
             "scan_id": self.scan_id,
             "target": self.target,
@@ -215,7 +234,7 @@ class ScanReport:
             "status": self.status,
             "risk_score": self.risk_score,
             "findings": [f.to_dict(redact=redact) for f in self.findings],
-            "metadata": self.metadata,
+            "metadata": metadata,
             "decision_trail": self.decision_trail,
         }
 
@@ -259,26 +278,100 @@ class BaseAttackModule(ABC):
         return []
 
 
+# Exact-match keys (lower-cased) that are always redacted regardless of value.
 REDACT_KEYS = {
     "authorization", "set-cookie", "cookie", "x-api-key", "token",
     "password", "secret", "api_key", "jwt", "access_token", "refresh_token",
+    "id_token", "client_secret", "client_id", "session_id", "sessionid",
+    "private_key", "csrf_token", "xsrf_token", "x-csrf-token", "x-xsrf-token",
+    "api-key", "apikey", "bearer", "auth", "auth_token",
 }
 
+# Substrings (lower-cased) — any key containing one of these is redacted.
+REDACT_KEY_SUBSTRINGS = (
+    "password", "secret", "token", "apikey", "api_key", "api-key",
+    "auth", "session", "cookie", "private", "credential",
+)
 
-def _redact_dict(d: dict[str, Any]) -> dict[str, Any]:
-    """Recursively redact sensitive values in a dict."""
-    if not isinstance(d, dict):
-        return d
-    result = {}
-    for key, value in d.items():
-        if key.lower() in REDACT_KEYS:
-            result[key] = "[REDACTED]"
-        elif isinstance(value, dict):
-            result[key] = _redact_dict(value)
-        elif isinstance(value, list):
-            result[key] = [
-                _redact_dict(v) if isinstance(v, dict) else v for v in value
-            ]
-        else:
-            result[key] = value
-    return result
+# Token-shaped value detectors. Any value matching one is replaced with a
+# typed redaction marker so we leak only the shape, never the bytes.
+_TOKEN_SHAPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("[REDACTED:JWT]", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]*")),
+    ("[REDACTED:AWS_KEY]", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("[REDACTED:GITHUB_TOKEN]", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
+    ("[REDACTED:SLACK_TOKEN]", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
+    ("[REDACTED:GOOGLE_API_KEY]", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("[REDACTED:BEARER]", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")),
+)
+
+# Cap probe_body size in serialized reports. Anything larger becomes
+# preview + length + sha256.
+PROBE_BODY_PREVIEW_BYTES = 4096
+
+
+def _should_redact_key(key: str) -> bool:
+    """Return True if a key name implies sensitive content."""
+    if not isinstance(key, str):
+        return False
+    lowered = key.lower()
+    if lowered in REDACT_KEYS:
+        return True
+    return any(sub in lowered for sub in REDACT_KEY_SUBSTRINGS)
+
+
+def _redact_value(value: Any) -> Any:
+    """Apply token-shape redaction to string values, leave others untouched."""
+    if not isinstance(value, str):
+        return value
+    redacted = value
+    for marker, pattern in _TOKEN_SHAPE_PATTERNS:
+        redacted = pattern.sub(marker, redacted)
+    return redacted
+
+
+def _redact_dict(d: Any) -> Any:
+    """Recursively redact sensitive keys and token-shaped values.
+
+    Accepts arbitrary nested structures (dict / list / scalar). Returns a
+    new structure; the input is not mutated.
+    """
+    if isinstance(d, dict):
+        result: dict[str, Any] = {}
+        for key, value in d.items():
+            if _should_redact_key(str(key)):
+                result[key] = "[REDACTED]"
+            elif isinstance(value, dict):
+                result[key] = _redact_dict(value)
+            elif isinstance(value, list):
+                result[key] = [_redact_dict(v) for v in value]
+            else:
+                result[key] = _redact_value(value)
+        return result
+    if isinstance(d, list):
+        return [_redact_dict(v) for v in d]
+    return _redact_value(d)
+
+
+def _summarize_probe_body(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Cap probe_body to a bounded preview + sha256 + length.
+
+    Returns a shallow copy of metadata with probe_body replaced when over
+    the cap. Leaves all other keys untouched. The cap protects both memory
+    and downstream artifacts from full-page captures.
+    """
+    if not isinstance(metadata, dict):
+        return metadata
+    body = metadata.get("probe_body")
+    if not isinstance(body, str):
+        return metadata
+    encoded = body.encode("utf-8", errors="ignore")
+    if len(encoded) <= PROBE_BODY_PREVIEW_BYTES:
+        return metadata
+    sha256 = hashlib.sha256(encoded).hexdigest()
+    preview = encoded[:PROBE_BODY_PREVIEW_BYTES].decode("utf-8", errors="replace")
+    summarized = dict(metadata)
+    summarized["probe_body"] = preview
+    summarized["probe_body_truncated"] = True
+    summarized["probe_body_length"] = len(encoded)
+    summarized["probe_body_sha256"] = sha256
+    return summarized
