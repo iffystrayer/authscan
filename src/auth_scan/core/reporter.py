@@ -1,6 +1,7 @@
 """Multi-format reporter: terminal, JSON, Markdown, HTML, PDF, SARIF."""
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -507,15 +508,47 @@ class Reporter:
         endpoints_tested: int = 0,
         output_dir: str = "./scan-results",
         target: str = "",
+        output_file: str | None = None,
     ) -> dict[str, str]:
         """Render and save reports in all configured formats.
 
-        Returns a dict mapping format -> output path or content.
+        When ``output_file`` is set (and there is exactly one non-terminal
+        format), the report for that format is written to that exact path
+        instead of the auto-named file under ``output_dir``. ``output_file``
+        may be ``"-"`` to write to stdout. Validation of "exactly one
+        format" happens in the CLI; here we just honor the override.
+
+        Returns a dict mapping format -> output path (or ``"stdout"``).
         """
         results: dict[str, str] = {}
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-T%H%M%SZ")
         safe_target = target.replace("https://", "").replace("http://", "").replace("/", "-")[:50]
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        # Only create the directory when we're going to use it.
+        if not output_file:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        def _write(fmt: str, default_name: str, content: str | bytes) -> str:
+            """Write ``content`` for ``fmt`` honoring --output-file override."""
+            if output_file:
+                if output_file == "-":
+                    if isinstance(content, bytes):
+                        sys.stdout.buffer.write(content)
+                    else:
+                        sys.stdout.write(content)
+                    return "stdout"
+                target_path = Path(output_file)
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                if isinstance(content, bytes):
+                    target_path.write_bytes(content)
+                else:
+                    target_path.write_text(content)
+                return str(target_path)
+            path = Path(output_dir) / default_name
+            if isinstance(content, bytes):
+                path.write_bytes(content)
+            else:
+                path.write_text(content)
+            return str(path)
 
         redact = not self.no_redact
         for fmt in self.output_formats:
@@ -526,39 +559,24 @@ class Reporter:
                     results["terminal"] = "stdout"
 
                 elif fmt == "json":
-                    json_rep = JsonReporter()
-                    content = json_rep.render(report, redact=redact)
-                    path = Path(output_dir) / f"{safe_target}-{timestamp}.json"
-                    path.write_text(content)
-                    results["json"] = str(path)
+                    content = JsonReporter().render(report, redact=redact)
+                    results["json"] = _write(fmt, f"{safe_target}-{timestamp}.json", content)
 
                 elif fmt == "markdown":
-                    md_rep = MarkdownReporter()
-                    content = md_rep.render(report, endpoints_tested, redact=redact)
-                    path = Path(output_dir) / f"{safe_target}-{timestamp}.md"
-                    path.write_text(content)
-                    results["markdown"] = str(path)
+                    content = MarkdownReporter().render(report, endpoints_tested, redact=redact)
+                    results["markdown"] = _write(fmt, f"{safe_target}-{timestamp}.md", content)
 
                 elif fmt == "html":
-                    html_rep = HtmlReporter()
-                    content = html_rep.render(report, endpoints_tested, redact=redact)
-                    path = Path(output_dir) / f"{safe_target}-{timestamp}.html"
-                    path.write_text(content)
-                    results["html"] = str(path)
+                    content = HtmlReporter().render(report, endpoints_tested, redact=redact)
+                    results["html"] = _write(fmt, f"{safe_target}-{timestamp}.html", content)
 
                 elif fmt == "pdf":
-                    pdf_rep = PdfReporter()
-                    pdf_bytes = pdf_rep.render(report, endpoints_tested, redact=redact)
-                    path = Path(output_dir) / f"{safe_target}-{timestamp}.pdf"
-                    path.write_bytes(pdf_bytes)
-                    results["pdf"] = str(path)
+                    pdf_bytes = PdfReporter().render(report, endpoints_tested, redact=redact)
+                    results["pdf"] = _write(fmt, f"{safe_target}-{timestamp}.pdf", pdf_bytes)
 
                 elif fmt == "sarif":
-                    sarif_rep = SarifReporter()
-                    content = sarif_rep.render(report, redact=redact)
-                    path = Path(output_dir) / f"{safe_target}-{timestamp}.sarif.json"
-                    path.write_text(content)
-                    results["sarif"] = str(path)
+                    content = SarifReporter().render(report, redact=redact)
+                    results["sarif"] = _write(fmt, f"{safe_target}-{timestamp}.sarif.json", content)
 
             except ImportError as e:
                 from rich.console import Console
