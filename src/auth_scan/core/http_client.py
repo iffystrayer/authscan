@@ -160,7 +160,13 @@ class ScopeEnforcer:
 
 @dataclass
 class RequestRecord:
-    """Metadata for a single HTTP request."""
+    """Metadata for a single HTTP request.
+
+    Response headers and body preview are scrubbed at capture time (M7).
+    The preview is capped at ``BODY_PREVIEW_BYTES``; the full body's
+    ``response_body_length`` and SHA-256 fingerprint are kept so analyses
+    that need to correlate without seeing the bytes still can.
+    """
 
     request_id: str
     method: str
@@ -168,8 +174,16 @@ class RequestRecord:
     status_code: int | None = None
     response_headers: dict[str, str] = field(default_factory=dict)
     response_body_preview: str = ""
+    response_body_length: int = 0
+    response_body_sha256: str = ""
     duration_ms: float = 0.0
     error: str | None = None
+
+
+# Maximum captured body preview in request history. Mirrors the cap in
+# ``base.PROBE_BODY_PREVIEW_BYTES`` so memory pressure is bounded
+# regardless of which path serializes a record. M7.
+BODY_PREVIEW_BYTES = 4096
 
 
 @dataclass
@@ -354,7 +368,20 @@ class HTTPClient:
         error: str | None = None,
         duration_ms: float = 0.0,
     ) -> RequestRecord:
-        """Record request metadata for audit trail."""
+        """Record request metadata for audit trail.
+
+        Response headers are scrubbed via the shared ``_redact_dict``
+        helper at capture time so the in-memory history can never leak
+        Authorization / Set-Cookie / similar tokens, even if the operator
+        later dumps it. The body preview is capped at
+        ``BODY_PREVIEW_BYTES`` and also value-shape redacted; full-body
+        bytes are not retained, but length + sha256 are.
+        """
+        # Import locally to avoid a circular module dependency at top of file.
+        import hashlib as _hashlib
+
+        from auth_scan.attacks.base import _redact_dict, _redact_value
+
         record = RequestRecord(
             request_id=request_id,
             method=method,
@@ -364,8 +391,14 @@ class HTTPClient:
         )
         if response is not None:
             record.status_code = response.status_code
-            record.response_headers = dict(response.headers)
-            record.response_body_preview = response.text[:500] if response.text else ""
+            record.response_headers = _redact_dict(dict(response.headers))
+            body = response.text or ""
+            encoded = body.encode("utf-8", errors="ignore")
+            record.response_body_length = len(encoded)
+            if encoded:
+                record.response_body_sha256 = _hashlib.sha256(encoded).hexdigest()
+            preview = body[:BODY_PREVIEW_BYTES]
+            record.response_body_preview = _redact_value(preview) if preview else ""
         self.request_history.append(record)
         return record
 

@@ -139,6 +139,9 @@ class ScanConfig:
     wordlist: str = ""
     user_wordlist: str = ""
     jwt_wordlist: str = ""
+    # Override path for the bundled default-credentials wordlist used by
+    # BruteForce. Empty = use the bundled list. M3.
+    default_creds_path: str = ""
 
     # Phase-2 module toggles
     no_discovery: bool = False
@@ -322,6 +325,7 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
         "wordlist",
         "user_wordlist",
         "jwt_wordlist",
+        "default_creds_path",
         "agentic",
         "max_depth",
         "confidence_threshold",

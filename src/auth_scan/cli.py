@@ -217,6 +217,16 @@ class AuthScanCommand(click.Command):
     help="Wordlist for JWT secret cracking.",
 )
 @click.option(
+    "--default-creds",
+    "default_creds_path",
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Override the bundled default-credentials wordlist. File format is "
+        "one 'user:password' pair per line; '#' comments and blank lines "
+        "are ignored."
+    ),
+)
+@click.option(
     "--no-discovery",
     is_flag=True,
     help="Skip path discovery phase.",
@@ -271,6 +281,7 @@ def main(
     output_file: str | None,
     init_config: bool,
     jwt_wordlist: str | None,
+    default_creds_path: str | None,
     no_discovery: bool,
     no_mfa: bool,
     oauth_scope: str | None,
@@ -382,6 +393,8 @@ def main(
         # Phase 2 flags
         if jwt_wordlist:
             config.jwt_wordlist = jwt_wordlist
+        if default_creds_path:
+            config.default_creds_path = default_creds_path
         if no_discovery:
             config.no_discovery = True
         if no_mfa:
