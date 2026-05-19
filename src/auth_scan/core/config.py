@@ -142,6 +142,9 @@ class ScanConfig:
     # Override path for the bundled default-credentials wordlist used by
     # BruteForce. Empty = use the bundled list. M3.
     default_creds_path: str = ""
+    # JWT HMAC offline cracking is opt-in (CPU expensive). L4.
+    jwt_crack: bool = False
+    jwt_crack_max_attempts: int = 5000
 
     # Phase-2 module toggles
     no_discovery: bool = False
@@ -326,6 +329,8 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
         "user_wordlist",
         "jwt_wordlist",
         "default_creds_path",
+        "jwt_crack",
+        "jwt_crack_max_attempts",
         "agentic",
         "max_depth",
         "confidence_threshold",

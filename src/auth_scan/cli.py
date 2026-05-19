@@ -214,7 +214,23 @@ class AuthScanCommand(click.Command):
 @click.option(
     "--jwt-wordlist",
     type=click.Path(exists=True, dir_okay=False),
-    help="Wordlist for JWT secret cracking.",
+    help="Wordlist for JWT HMAC secret cracking (requires --jwt-crack).",
+)
+@click.option(
+    "--jwt-crack",
+    is_flag=True,
+    help=(
+        "Enable offline HMAC secret cracking against discovered JWTs. "
+        "CPU-expensive; off by default. Tune --jwt-crack-max-attempts to "
+        "cap effort per token."
+    ),
+)
+@click.option(
+    "--jwt-crack-max-attempts",
+    type=int,
+    default=5000,
+    show_default=True,
+    help="Maximum HMAC cracking attempts per token (requires --jwt-crack).",
 )
 @click.option(
     "--default-creds",
@@ -281,6 +297,8 @@ def main(
     output_file: str | None,
     init_config: bool,
     jwt_wordlist: str | None,
+    jwt_crack: bool,
+    jwt_crack_max_attempts: int,
     default_creds_path: str | None,
     no_discovery: bool,
     no_mfa: bool,
@@ -393,6 +411,10 @@ def main(
         # Phase 2 flags
         if jwt_wordlist:
             config.jwt_wordlist = jwt_wordlist
+        if jwt_crack:
+            config.jwt_crack = True
+        if jwt_crack_max_attempts != 5000:
+            config.jwt_crack_max_attempts = jwt_crack_max_attempts
         if default_creds_path:
             config.default_creds_path = default_creds_path
         if no_discovery:
