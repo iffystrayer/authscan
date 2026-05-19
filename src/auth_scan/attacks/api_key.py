@@ -99,12 +99,8 @@ class ApiKeyAnalyzer(BaseAttackModule):
                 result.findings.extend(found)
                 total_found += len(found)
 
-        # Also check probe body for exposed keys
-        probe_body = report.metadata.get("probe_body", "")
-        if probe_body:
-            found = self._scan_text(probe_body, "probe_body", None)
-            result.findings.extend(found)
-            total_found += len(found)
+        # (probe_body is already covered by the SCAN_LOCATIONS loop above —
+        # the previous duplicate pass produced two findings per key. M2.)
 
         # Check for keys in URL parameters of discovered paths
         path_results = report.metadata.get("path_results", {})

@@ -184,7 +184,20 @@ class JWTAnalyzer(BaseAttackModule):
         http_client: Any,
         target: str,
     ) -> list[Finding]:
-        """FR-JWT-003: Test if alg=none is accepted."""
+        """FR-JWT-003: Test if alg=none is accepted.
+
+        Previously this fired on ``status == 200 and "error" not in
+        resp.text.lower()`` — a fragile keyword check that produced false
+        negatives against APIs which return 200 with non-standard error
+        bodies like ``{"status": "unauthorized"}``.
+
+        Now we baseline against the *original* (validly-signed) token: a
+        forged ``alg=none`` token only counts as accepted when the
+        forged-token response closely matches the original (same status
+        AND a body-shape fingerprint within tolerance). When no baseline
+        is available we keep the legacy keyword check as a fallback so
+        unauthenticated endpoints still get exercised.
+        """
         findings: list[Finding] = []
 
         try:
@@ -196,15 +209,42 @@ class JWTAnalyzer(BaseAttackModule):
             )
             payload_b64 = base64.urlsafe_b64encode(json.dumps(token.payload).encode()).rstrip(b"=").decode()
             none_jwt = f"{none_header}.{payload_b64}."
+            original_jwt = token.raw
 
-            # Test against common endpoints
             for endpoint in ["/api/profile", "/api/user", "/api/me", "/"]:
                 try:
+                    # 1) Baseline with the real token.
+                    baseline = None
+                    try:
+                        baseline = http_client.get(
+                            endpoint,
+                            headers={"Authorization": f"Bearer {original_jwt}"},
+                        )
+                    except Exception:
+                        baseline = None
+
+                    # 2) Forge with alg=none.
                     resp = http_client.get(
                         endpoint,
                         headers={"Authorization": f"Bearer {none_jwt}"},
                     )
-                    if resp.status_code == 200 and "error" not in resp.text.lower():
+
+                    if resp.status_code != 200:
+                        continue
+
+                    accepted = False
+                    if baseline is not None and baseline.status_code == 200:
+                        # Compare fingerprints: status, content-length proximity,
+                        # and JSON-shape overlap if both are JSON. A genuine
+                        # bypass returns the same authenticated payload; an
+                        # error responds differently regardless of phrasing.
+                        accepted = self._looks_authenticated(baseline, resp)
+                    else:
+                        # No baseline available — fall back to the legacy
+                        # keyword heuristic.
+                        accepted = "error" not in resp.text.lower()
+
+                    if accepted:
                         findings.append(
                             Finding(
                                 title="JWT alg=none Accepted",
@@ -223,6 +263,14 @@ class JWTAnalyzer(BaseAttackModule):
                                         "status": resp.status_code,
                                         "body_preview": resp.text[:300],
                                     },
+                                    "baseline": (
+                                        {
+                                            "status": baseline.status_code,
+                                            "body_length": len(baseline.text),
+                                        }
+                                        if baseline is not None
+                                        else None
+                                    ),
                                 },
                                 remediation=(
                                     "Configure the JWT validation library to explicitly reject tokens "
@@ -244,6 +292,34 @@ class JWTAnalyzer(BaseAttackModule):
             pass
 
         return findings
+
+    @staticmethod
+    def _looks_authenticated(baseline: Any, forged: Any) -> bool:
+        """Return True if ``forged`` plausibly returned the same authenticated
+        payload as ``baseline`` — used to confirm an alg=none bypass.
+
+        Heuristics, in order of strength:
+          * If both bodies parse as JSON with overlapping top-level keys,
+            we treat that as authentication confirmation.
+          * Otherwise, accept when body lengths agree within 20 %.
+        """
+        if forged.status_code != baseline.status_code:
+            return False
+        try:
+            bj = baseline.json()
+            fj = forged.json()
+            if isinstance(bj, dict) and isinstance(fj, dict):
+                bk = set(bj.keys())
+                fk = set(fj.keys())
+                if bk and fk and len(bk & fk) >= max(1, len(bk) // 2):
+                    return True
+                return False
+            # Non-dict JSON: fall through to length comparison.
+        except Exception:
+            pass
+        bl = len(baseline.text) or 1
+        fl = len(forged.text)
+        return abs(bl - fl) / bl <= 0.2
 
     def _test_key_confusion(
         self,

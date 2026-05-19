@@ -505,20 +505,17 @@ class OODAEngine:
                 )
                 break
 
-            if not assessment["gaps"] and self._modules_run >= {
-                "jwt",
-                "session",
-                "brute",
-                "oauth",
-                "mfa",
-                "api_key",
-            }:
+            # M4: derive the termination set from the live module_map
+            # instead of a hardcoded list. This ensures plugin-registered
+            # modules also get exercised before the agent concludes.
+            all_modules = set(module_map.keys())
+            if all_modules and not assessment["gaps"] and self._modules_run >= all_modules:
                 self.decision_trail.append(
                     DecisionRecord(
                         cycle=self.cycle,
                         phase="decide",
                         action="conclude",
-                        reasoning="No gaps remaining and core modules exhausted.",
+                        reasoning="No gaps remaining and all registered modules exhausted.",
                     )
                 )
                 break
