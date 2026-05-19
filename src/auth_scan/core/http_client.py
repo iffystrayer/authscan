@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import time
 import uuid
@@ -31,6 +32,8 @@ CLOUD_METADATA_HOSTS = frozenset(
         "fd00:ec2::254",  # AWS IMDSv2 IPv6
     }
 )
+
+_log = logging.getLogger(__name__)
 
 
 def _is_private_or_metadata_host(host: str) -> bool:
@@ -543,8 +546,8 @@ class HTTPClient:
                         }
                     )
                 forms.append(form_data)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         # Determine TLS version from the final URL
         tls_version = None

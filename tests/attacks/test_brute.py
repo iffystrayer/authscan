@@ -258,22 +258,41 @@ class TestLockoutDetection:
 
         run()
 
-    def test_speedup_no_longer_triggers_lockout(self) -> None:
+    def test_speedup_no_longer_triggers_lockout(self, monkeypatch) -> None:
         """Before C3, faster later responses incorrectly fired lockout. They
-        should now never do so (slow-down is the correct signal)."""
+        should now never do so (slow-down is the correct signal).
+
+        The post-hoc heuristic compares the average of the last 5 timings
+        against the first 10. Pre-fix CI flaked because real wall clock
+        under load occasionally produced a >1.5× spread between the two
+        windows even though all responses came back ~instantly. Inject a
+        flat clock so the test exercises the *logic*, not the OS scheduler.
+        """
         bf = BruteForce()
+
+        # Stub the module-local time.monotonic to return a strictly
+        # monotonic sequence with a uniform 1 ms step. The wider scan also
+        # asks the rate limiter for monotonic readings; the same flat
+        # sequence is fine for both because the logic only cares about
+        # *deltas* and they're all equal.
+        import auth_scan.attacks.brute as brute_mod
+
+        clock = [0.0]
+
+        def fake_monotonic() -> float:
+            clock[0] += 0.001
+            return clock[0]
+
+        monkeypatch.setattr(brute_mod.time, "monotonic", fake_monotonic)
 
         @responses.activate
         def run():
-            # 12 failures so we have > 10 timings; responses will reply
-            # immediately so all durations are similar (no slowdown).
             for _ in range(12):
                 responses.add(responses.POST, "https://example.com/login", body="invalid", status=401)
             client = HTTPClient(base_url="https://example.com", rate_limit=1000)
             creds = [(f"u{i}", f"p{i}") for i in range(12)]
             result = bf._test_form(self._form(), creds, "https://example.com", client)
             lockout_findings = [f for f in result.findings if "Lockout" in f.title]
-            # We expect *no* lockout finding when responses don't slow down.
             assert lockout_findings == [], (
                 f"Unexpected lockout finding: {[f.title for f in lockout_findings]}"
             )

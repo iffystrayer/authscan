@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import re
 from typing import Any
 
@@ -17,6 +18,8 @@ from auth_scan.attacks.base import (
     Severity,
 )
 from auth_scan.core.session import TokenInfo
+
+_log = logging.getLogger(__name__)
 
 
 class JWTAnalyzer(BaseAttackModule):
@@ -161,8 +164,8 @@ class JWTAnalyzer(BaseAttackModule):
                     for cookie in resp.cookies:
                         if self._looks_like_jwt(cookie.value):
                             tokens.append(TokenInfo.from_string(cookie.value, "cookie", cookie.name))
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return tokens
 
@@ -286,10 +289,10 @@ class JWTAnalyzer(BaseAttackModule):
                             )
                         )
                         break
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    _log.debug("swallowed: %s", exc)
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -315,8 +318,8 @@ class JWTAnalyzer(BaseAttackModule):
                     return True
                 return False
             # Non-dict JSON: fall through to length comparison.
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
         bl = len(baseline.text) or 1
         fl = len(forged.text)
         return abs(bl - fl) / bl <= 0.2
@@ -394,10 +397,10 @@ class JWTAnalyzer(BaseAttackModule):
                             )
                         )
                         break
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    _log.debug("swallowed: %s", exc)
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -440,8 +443,8 @@ class JWTAnalyzer(BaseAttackModule):
                                 serialization.PublicFormat.SubjectPublicKeyInfo,
                             )
                             return pem.decode()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return None
 
@@ -616,10 +619,10 @@ class JWTAnalyzer(BaseAttackModule):
                             )
                         )
                         break
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    _log.debug("swallowed: %s", exc)
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -783,8 +786,8 @@ class JWTAnalyzer(BaseAttackModule):
             try:
                 with open(wordlist_path) as f:
                     wordlist = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         if not wordlist:
             wordlist = self.JWT_SECRET_WORDLIST
@@ -827,7 +830,7 @@ class JWTAnalyzer(BaseAttackModule):
                         )
                     )
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return findings

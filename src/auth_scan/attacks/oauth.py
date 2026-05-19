@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.parse import urljoin
@@ -44,6 +45,8 @@ OAUTH_KEYWORDS = [
     "pkce",
     "code_challenge",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 class OAuthTester(BaseAttackModule):
@@ -162,12 +165,12 @@ class OAuthTester(BaseAttackModule):
                                 ]:
                                     if key in data and isinstance(data[key], str):
                                         endpoints[key] = data[key]
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _log.debug("swallowed: %s", exc)
                     else:
                         endpoints[well_known] = url
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         # Also check the path discovery results
         path_results = report.metadata.get("path_results", {})
@@ -228,8 +231,8 @@ class OAuthTester(BaseAttackModule):
                             tags=["oauth", "csrf", "state"],
                         )
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -291,8 +294,8 @@ class OAuthTester(BaseAttackModule):
                             )
                         )
                         break
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -335,8 +338,8 @@ class OAuthTester(BaseAttackModule):
                         tags=["oauth", "implicit-flow"],
                     )
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -384,8 +387,8 @@ class OAuthTester(BaseAttackModule):
                             tags=["oauth", "pkce"],
                         )
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -482,7 +485,7 @@ class OAuthTester(BaseAttackModule):
                             tags=["oauth", "scope-escalation"],
                         )
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
