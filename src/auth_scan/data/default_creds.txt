@@ -1,0 +1,51 @@
+# Default credential pairs for quick discovery.
+#
+# Format: one pair per line, "<username>:<password>". Comments (lines
+# starting with "#") and blank lines are ignored. A trailing colon
+# encodes an empty password.
+#
+# Override at runtime with the CLI `--default-creds <path>` flag or
+# `ScanConfig.default_creds_path`. The bundled list is intentionally
+# small — see your engagement's wordlists for breadth.
+admin:admin
+admin:password
+admin:admin123
+admin:password123
+admin:123456
+admin:letmein
+administrator:administrator
+administrator:password
+root:root
+root:password
+root:toor
+root:admin
+user:user
+user:password
+user:123456
+test:test
+test:password
+guest:guest
+guest:password
+operator:operator
+manager:manager
+sa:sa
+demo:demo
+info:info
+temp:temp
+sysadmin:sysadmin
+supervisor:supervisor
+default:default
+dev:dev
+backup:backup
+support:support
+postgres:postgres
+mysql:mysql
+oracle:oracle
+ftp:ftp
+tomcat:tomcat
+jenkins:jenkins
+service:service
+admin:
+user:
+test:
+administrator:

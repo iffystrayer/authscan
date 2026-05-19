@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from importlib import resources
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -16,53 +17,56 @@ from auth_scan.attacks.base import (
     Severity,
 )
 
-# Built-in default credential pairs for quick testing
-DEFAULT_CREDENTIALS: list[tuple[str, str]] = [
-    ("admin", "admin"),
-    ("admin", "password"),
-    ("admin", "admin123"),
-    ("admin", "password123"),
-    ("admin", "123456"),
-    ("admin", "letmein"),
-    ("administrator", "administrator"),
-    ("administrator", "password"),
-    ("root", "root"),
-    ("root", "password"),
-    ("root", "toor"),
-    ("root", "admin"),
-    ("user", "user"),
-    ("user", "password"),
-    ("user", "123456"),
-    ("test", "test"),
-    ("test", "password"),
-    ("guest", "guest"),
-    ("guest", "password"),
-    ("operator", "operator"),
-    ("manager", "manager"),
-    ("sa", "sa"),
-    ("demo", "demo"),
-    ("info", "info"),
-    ("temp", "temp"),
-    ("sysadmin", "sysadmin"),
-    ("supervisor", "supervisor"),
-    ("default", "default"),
-    ("dev", "dev"),
-    ("backup", "backup"),
-    ("support", "support"),
-    ("postgres", "postgres"),
-    ("mysql", "mysql"),
-    ("oracle", "oracle"),
-    ("ftp", "ftp"),
-    ("tomcat", "tomcat"),
-    ("jenkins", "jenkins"),
-    ("service", "service"),
-    ("admin", ""),  # empty password
-    ("user", ""),
-    ("test", ""),
-    ("administrator", ""),
-]
-
 _log = logging.getLogger(__name__)
+
+
+def _parse_creds_text(text: str) -> list[tuple[str, str]]:
+    """Parse a wordlist file body of ``username:password`` pairs.
+
+    Comments (lines starting with ``#``) and blank lines are ignored. A
+    trailing colon encodes an empty password. Lines without a colon are
+    skipped with a DEBUG log.
+    """
+    pairs: list[tuple[str, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            _log.debug("skipping malformed default-creds line: %r", raw)
+            continue
+        user, _, pw = line.partition(":")
+        pairs.append((user, pw))
+    return pairs
+
+
+def _load_bundled_default_credentials() -> list[tuple[str, str]]:
+    """Load the bundled ``default_creds.txt`` via ``importlib.resources``."""
+    pkg = resources.files("auth_scan.data").joinpath("default_creds.txt")
+    return _parse_creds_text(pkg.read_text(encoding="utf-8"))
+
+
+def load_default_credentials(path: str | None = None) -> list[tuple[str, str]]:
+    """Return the default credential set.
+
+    Operators can override the bundled list by passing ``path`` (the CLI
+    routes ``--default-creds`` here, and ``ScanConfig.default_creds_path``
+    is consulted by ``BruteForce.run``). A missing or unreadable file
+    falls back to the bundled list with a DEBUG log.
+    """
+    if path:
+        try:
+            data = Path(path).read_text(encoding="utf-8")
+            return _parse_creds_text(data)
+        except OSError as exc:
+            _log.debug("default-creds override unreadable (%s): %s", path, exc)
+    return _load_bundled_default_credentials()
+
+
+# Module-level constant retained for backwards-compatibility with tests and
+# downstream code that imports ``DEFAULT_CREDENTIALS``. Loaded once on
+# import; pass ``--default-creds`` to override at runtime.
+DEFAULT_CREDENTIALS: list[tuple[str, str]] = _load_bundled_default_credentials()
 
 
 class BruteForce(BaseAttackModule):
@@ -113,10 +117,12 @@ class BruteForce(BaseAttackModule):
             )
             return result
 
-        # Load wordlists
+        # Load wordlists. Default-credentials list can be overridden via
+        # ``ScanConfig.default_creds_path`` / CLI ``--default-creds``.
         credentials = self._load_credentials(
             getattr(config, "wordlist", ""),
             getattr(config, "user_wordlist", ""),
+            getattr(config, "default_creds_path", "") or None,
         )
 
         # Test each login form
@@ -168,10 +174,14 @@ class BruteForce(BaseAttackModule):
         self,
         wordlist_path: str,
         user_wordlist_path: str,
+        default_creds_path: str | None = None,
     ) -> list[tuple[str, str]]:
         """FR-BF-002, FR-BF-003: Load credentials from wordlists or defaults."""
         usernames: list[str] = []
         passwords: list[str] = []
+
+        # Resolve the default-credentials list once (bundled or overridden).
+        defaults = load_default_credentials(default_creds_path)
 
         # Load username wordlist
         if user_wordlist_path and Path(user_wordlist_path).exists():
@@ -183,13 +193,13 @@ class BruteForce(BaseAttackModule):
 
         # FR-BF-003: Use built-in defaults when no wordlists provided
         if not usernames and not passwords:
-            return list(DEFAULT_CREDENTIALS)
+            return list(defaults)
 
         # Use discovered usernames + wordlist passwords
         if not usernames:
-            usernames = list({u for u, _ in DEFAULT_CREDENTIALS})[:10]
+            usernames = list({u for u, _ in defaults})[:10]
         if not passwords:
-            passwords = list({p for _, p in DEFAULT_CREDENTIALS})[:50]
+            passwords = list({p for _, p in defaults})[:50]
 
         # Generate combinations (cartesian product, capped)
         credentials: list[tuple[str, str]] = []

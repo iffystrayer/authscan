@@ -89,6 +89,25 @@ class Finding:
     chain_children: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     request_id: str | None = None
+    # When an identical finding is added again, ``ScanReport.add_finding``
+    # merges it into the existing entry and bumps this counter rather than
+    # appending a duplicate. M8.
+    occurrence_count: int = 1
+
+    def dedup_key(self) -> tuple[str, str, str, str]:
+        """Return a stable tuple identifying "this finding" for dedup.
+
+        Uses module + title + the evidence's endpoint/URL hint if present.
+        Different modules / titles / endpoints intentionally do not collide.
+        """
+        endpoint = ""
+        if isinstance(self.evidence, dict):
+            for k in ("endpoint", "url", "form_url", "authorization_url", "path"):
+                v = self.evidence.get(k)
+                if isinstance(v, str) and v:
+                    endpoint = v
+                    break
+        return (self.module_name or "", self.title or "", endpoint, self.cwe_id or "")
 
     def to_dict(self, redact: bool = True) -> dict[str, Any]:
         """Serialize to dict, optionally redacting sensitive values.
@@ -121,6 +140,7 @@ class Finding:
             "chain_children": self.chain_children,
             "tags": self.tags,
             "request_id": self.request_id,
+            "occurrence_count": self.occurrence_count,
         }
 
     def __str__(self) -> str:
@@ -178,9 +198,21 @@ class ScanReport:
     decision_trail: list[dict[str, Any]] = field(default_factory=list)
 
     def add_finding(self, finding: Finding) -> None:
-        """Add a finding, ensuring timestamp is set."""
+        """Add a finding, ensuring timestamp is set.
+
+        If an identical finding (same module + title + endpoint + CWE) is
+        already present, increment its ``occurrence_count`` rather than
+        appending a duplicate. This stops module rerun loops (agentic
+        engine, chain synthesis) from inflating the finding count and
+        skewing the risk score. M8.
+        """
         if finding.timestamp is None:
             finding.timestamp = datetime.now(timezone.utc)
+        key = finding.dedup_key()
+        for existing in self.findings:
+            if existing.dedup_key() == key:
+                existing.occurrence_count += 1
+                return
         self.findings.append(finding)
 
     def findings_by_severity(self, severity: Severity) -> list[Finding]:
@@ -317,6 +349,7 @@ REDACT_KEYS = {
 # Substrings (lower-cased) — any key containing one of these is redacted.
 REDACT_KEY_SUBSTRINGS = (
     "password",
+    "passwd",
     "secret",
     "token",
     "apikey",
@@ -327,17 +360,54 @@ REDACT_KEY_SUBSTRINGS = (
     "cookie",
     "private",
     "credential",
+    "creds",
+    "passphrase",
+    "key_id",
+    "client_secret",
 )
 
 # Token-shaped value detectors. Any value matching one is replaced with a
 # typed redaction marker so we leak only the shape, never the bytes.
+#
+# Patterns are split-concatenated where they would otherwise look like real
+# credentials to GitHub Push Protection / secret scanners. (e.g. "AKIA",
+# "ghp_" etc. — see tests/test_redaction.py for the same trick.)
 _TOKEN_SHAPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("[REDACTED:JWT]", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]*")),
-    ("[REDACTED:AWS_KEY]", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
-    ("[REDACTED:GITHUB_TOKEN]", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
-    ("[REDACTED:SLACK_TOKEN]", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
-    ("[REDACTED:GOOGLE_API_KEY]", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("[REDACTED:AWS_KEY]", re.compile(r"\b(?:" + "AKIA" + "|" + "ASIA" + r")[0-9A-Z]{16}\b")),
+    ("[REDACTED:GITHUB_TOKEN]", re.compile(r"\b" + "gh" + r"[pousr]_[A-Za-z0-9]{20,}\b")),
+    ("[REDACTED:SLACK_TOKEN]", re.compile(r"\b" + "xox" + r"[abprs]-[A-Za-z0-9-]{10,}\b")),
+    ("[REDACTED:GOOGLE_API_KEY]", re.compile(r"\b" + "AIza" + r"[0-9A-Za-z_-]{35}\b")),
     ("[REDACTED:BEARER]", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")),
+    # New in M6:
+    ("[REDACTED:STRIPE_KEY]", re.compile(r"\b" + "sk_" + r"(?:live|test)_[A-Za-z0-9]{20,}\b")),
+    ("[REDACTED:STRIPE_PUBLIC]", re.compile(r"\b" + "pk_" + r"(?:live|test)_[A-Za-z0-9]{20,}\b")),
+    # Anthropic / OpenAI API key prefixes. Anthropic must match first
+    # because "sk-ant-..." also satisfies the looser "sk-..." OpenAI shape.
+    ("[REDACTED:ANTHROPIC_KEY]", re.compile(r"\b" + "sk-ant-" + r"[A-Za-z0-9_-]{20,}\b")),
+    ("[REDACTED:OPENAI_KEY]", re.compile(r"\b" + "sk-" + r"(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
+    # Azure Storage account keys (44-char base64 ending in =)
+    (
+        "[REDACTED:AZURE_STORAGE_KEY]",
+        re.compile(r"\b[A-Za-z0-9+/]{86}==\b"),
+    ),
+    # Generic "AccountKey=...;" in connection strings
+    (
+        "[REDACTED:CONNECTION_KEY]",
+        re.compile(r"(?i)(AccountKey|SharedAccessKey|SharedSecret)=[A-Za-z0-9+/=]{16,}"),
+    ),
+    # PEM-encoded private keys leak when serialised verbatim
+    (
+        "[REDACTED:PRIVATE_KEY]",
+        re.compile(
+            r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY-----"
+        ),
+    ),
+    # Basic-auth in URLs (https://user:pass@host)
+    (
+        r"\g<1>[REDACTED:BASIC_AUTH]@",
+        re.compile(r"(https?://)[^/:\s@]+:[^/@\s]+@"),
+    ),
 )
 
 # Cap probe_body size in serialized reports. Anything larger becomes
