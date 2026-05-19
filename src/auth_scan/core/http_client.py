@@ -232,7 +232,7 @@ class HTTPClient:
         timeout: int = 30,
         scope_allow: list[str] | None = None,
         scope_deny: list[str] | None = None,
-        user_agent: str = "auth-scan/0.1.0",
+        user_agent: str = "",  # empty -> derived from auth_scan.__version__
         cookies: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         allow_private_redirects: bool = False,
@@ -270,7 +270,13 @@ class HTTPClient:
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
 
-        # Default headers
+        # Default headers. An empty user_agent triggers the canonical
+        # f"auth-scan/{__version__}" form so the UA is always consistent
+        # with the installed package version. L7.
+        if not user_agent:
+            from auth_scan import __version__ as _av
+
+            user_agent = f"auth-scan/{_av}"
         self.session.headers["User-Agent"] = user_agent
         if headers:
             self.session.headers.update(headers)

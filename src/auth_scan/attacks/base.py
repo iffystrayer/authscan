@@ -11,6 +11,11 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+# Multiplier applied to the severity-numeric sum when computing the risk
+# score (see ``ScanReport.risk_score``). Set so that ~five CRITICAL
+# findings (severity.numeric == 9.5 each) saturate the 100-point cap. L1.
+RISK_SCORE_WEIGHT = 2.5
+
 
 class Severity(str, Enum):
     """Finding severity levels with numeric ranges for CVSS mapping."""
@@ -237,14 +242,22 @@ class ScanReport:
 
     @property
     def risk_score(self) -> float:
-        """Overall risk score: weighted sum of finding severities, 0–100."""
+        """Overall risk score: monotonically-nondecreasing weighted sum,
+        clamped to [0, 100].
+
+        Pre-PR-8 the formula divided the severity sum by ``min(n, 20)`` —
+        so adding a 21st *below-average* finding could *decrease* the
+        score even though the target had more problems than before. The
+        replacement is a saturating sum: each finding contributes its
+        severity weight (CRITICAL=9.5, HIGH=8.0, MEDIUM=5.5, LOW=2.0,
+        INFO=0.0) scaled by ``RISK_SCORE_WEIGHT``, with the total clamped
+        to 100. Saturation point is ~five CRITICAL findings, matching the
+        intuition that one such defect already warrants attention. L1.
+        """
         if not self.findings:
             return 0.0
-        total = sum(f.severity.numeric for f in self.findings)
-        # Scale: max 100 points, normalize by finding count cap
-        capped = min(len(self.findings), 20)
-        score = (total / capped) * 10.0
-        return round(min(score, 100.0), 1)
+        total = sum(f.severity.numeric for f in self.findings) * RISK_SCORE_WEIGHT
+        return round(min(total, 100.0), 1)
 
     @property
     def exit_code(self) -> int:

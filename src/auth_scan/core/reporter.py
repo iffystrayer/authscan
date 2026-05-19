@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from auth_scan import __version__
 from auth_scan.attacks.base import ScanReport, Severity, _redact_value
 
 
@@ -77,7 +78,7 @@ class TerminalReporter:
         console.print()
         console.print(
             Panel.fit(
-                "[bold blue]auth-scan[/bold blue] v0.1.0 — Web Authentication Security Scanner",
+                f"[bold blue]auth-scan[/bold blue] v{__version__} — Web Authentication Security Scanner",
                 border_style="blue",
             )
         )
@@ -494,7 +495,7 @@ class SarifReporter:
                     "tool": {
                         "driver": {
                             "name": "auth-scan",
-                            "version": "0.1.0",
+                            "version": __version__,
                             "informationUri": "https://github.com/auth-scan/auth-scan",
                             "rules": rules,
                         },

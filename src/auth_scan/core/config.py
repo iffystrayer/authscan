@@ -108,7 +108,7 @@ class ScanConfig:
     # HTTP
     rate_limit: int = 10
     timeout: int = 30
-    user_agent: str = "auth-scan/0.1.0"
+    user_agent: str = ""  # empty -> HTTPClient injects f"auth-scan/{__version__}"
     proxy: str = ""
     headers: dict[str, str] = field(default_factory=dict)
     cookies: dict[str, str] = field(default_factory=dict)

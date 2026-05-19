@@ -13,7 +13,11 @@ from auth_scan.attacks.base import (
     Severity,
 )
 
-# API key detection patterns
+# API key detection patterns. Keep as raw strings for readability and
+# external auditability — the compiled equivalents live in
+# ``COMPILED_API_KEY_PATTERNS`` below and are what ``_scan_text`` actually
+# uses (L2). Python's internal LRU caches the regex, but compiling once
+# at module load is both faster and immune to cache eviction under load.
 API_KEY_PATTERNS: list[tuple[str, str, str]] = [
     # (label, regex pattern, risk level)
     ("GitHub Token", r"(?:gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82})", "critical"),
@@ -55,6 +59,13 @@ SCAN_LOCATIONS = [
     "probe_body",  # Main page HTML
     "probe_headers",  # Response headers
     "probe_cookies",  # Response cookies
+]
+
+
+# Pre-compiled regex tuples used by ``_scan_text``. Built once at module
+# import to avoid re-compiling each invocation. L2.
+COMPILED_API_KEY_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
+    (label, re.compile(pattern), risk) for label, pattern, risk in API_KEY_PATTERNS
 ]
 
 
@@ -143,9 +154,9 @@ class ApiKeyAnalyzer(BaseAttackModule):
         """Scan text for known API key patterns."""
         findings: list[Finding] = []
 
-        for label, pattern, risk in API_KEY_PATTERNS:
+        for label, compiled, risk in COMPILED_API_KEY_PATTERNS:
             try:
-                for match in re.finditer(pattern, text):
+                for match in compiled.finditer(text):
                     matched = match.group(0)
                     # Skip false positives
                     if self._is_false_positive(matched, text, match.start()):
@@ -160,7 +171,7 @@ class ApiKeyAnalyzer(BaseAttackModule):
                     evidence = {
                         "type": label,
                         "location": location,
-                        "pattern_matched": pattern[:60],
+                        "pattern_matched": compiled.pattern[:60],
                         "match_length": len(matched),
                     }
                     if source_key:
