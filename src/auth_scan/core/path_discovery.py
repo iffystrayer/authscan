@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 from typing import Any
 
 # ~80 common auth-related paths
@@ -93,48 +94,71 @@ AUTH_PATHS: list[str] = [
 ]
 
 
+def _probe_one(http_client: Any, path: str, timeout_per: int) -> dict[str, Any]:
+    """Issue a single probe and return its serialized result entry.
+
+    Network and HTTP errors are normalised to a zero-status placeholder so
+    the parallel runner doesn't have to special-case them. The HTTP
+    client's own rate limiter still serialises wire access.
+    """
+    try:
+        resp = http_client.get(path, timeout=timeout_per)
+        status = resp.status_code
+        entry: dict[str, Any] = {
+            "status": status,
+            "length": len(resp.content),
+            "headers": dict(resp.headers),
+            "interesting": status not in (404, 410, 405, 501),
+        }
+        if status in (200, 301, 302, 307, 308, 401, 403):
+            entry["interesting"] = True
+        return entry
+    except Exception:
+        return {"status": 0, "length": 0, "headers": {}, "interesting": False}
+
+
 def discover_paths(
     http_client: Any,
     paths: list[str] | None = None,
     max_paths: int = 80,
     timeout_per: int = 3,
+    max_workers: int = 10,
 ) -> dict[str, dict[str, Any]]:
     """Probe common paths and record responses.
+
+    Probes run on a bounded ``ThreadPoolExecutor`` (default 10 workers) so
+    discovery on slow or geographically-distant targets is no longer
+    serialised — previously 80 paths × 3s timeout could take 240s before
+    any attack module started. Rate limiting is still enforced at the
+    HTTP-client level (``RateLimiter.acquire()`` inside each request), so
+    the global request budget is unchanged; only the latency hides behind
+    parallel I/O.
 
     Returns dict mapping path -> {status, length, headers, interesting}.
     "interesting" is True for non-404 responses or auth-related endpoints.
     """
-    results: dict[str, dict[str, Any]] = {}
     to_check = (paths or AUTH_PATHS)[:max_paths]
+    if not to_check:
+        return {}
 
-    for path in to_check:
-        try:
-            resp = http_client.get(path, timeout=timeout_per)
-            status = resp.status_code
+    results: dict[str, dict[str, Any]] = {}
+    # max_workers=1 falls back to serial — useful for tests that record
+    # request order, and for environments that can't spawn threads.
+    workers = max(1, min(max_workers, len(to_check)))
 
-            # Normalize path
-            path.rstrip("/") or "/"
-
-            results[path] = {
-                "status": status,
-                "length": len(resp.content),
-                "headers": dict(resp.headers),
-                "interesting": status not in (404, 410, 405, 501),
-            }
-
-            # Flag auth-related responses
-            if status in (200, 301, 302, 307, 308, 401, 403):
-                results[path]["interesting"] = True
-
-        except Exception:
-            # Silently skip unreachable paths
-            results[path] = {
-                "status": 0,
-                "length": 0,
-                "headers": {},
-                "interesting": False,
-            }
-
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_path = {pool.submit(_probe_one, http_client, path, timeout_per): path for path in to_check}
+        for future in concurrent.futures.as_completed(future_to_path):
+            path = future_to_path[future]
+            try:
+                results[path] = future.result()
+            except Exception:
+                results[path] = {
+                    "status": 0,
+                    "length": 0,
+                    "headers": {},
+                    "interesting": False,
+                }
     return results
 
 
