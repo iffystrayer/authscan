@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -25,6 +26,8 @@ WS_INDICATORS = [
     r"sockjs",
     r"signalr",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 class WebSocketAuth(BaseAttackModule):
@@ -218,8 +221,8 @@ class WebSocketAuth(BaseAttackModule):
                         tags=["websocket", "manual-test"],
                     )
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return findings
 

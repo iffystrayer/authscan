@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import signal
 import sys
@@ -16,8 +17,11 @@ from auth_scan.core.exceptions import ConfigError, HttpError, ModuleError
 from auth_scan.core.http_client import HTTPClient
 from auth_scan.core.session import check_security_headers
 
-
 # Module discovery via entry_points (Phase 2 plugin system)
+
+_log = logging.getLogger(__name__)
+
+
 def discover_modules() -> dict[str, type[BaseAttackModule]]:
     """Discover all available attack modules via entry_points + built-in fallback.
 
@@ -37,10 +41,10 @@ def discover_modules() -> dict[str, type[BaseAttackModule]]:
                 cls = ep.load()
                 if isinstance(cls, type) and issubclass(cls, BaseAttackModule) and hasattr(cls, "name"):
                     modules[cls.name] = cls
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
+    except Exception as exc:
+        _log.debug("swallowed: %s", exc)
 
     # Fall back to built-in hardcoded registry if entry_points fails or returns nothing
     if not modules:
@@ -122,8 +126,8 @@ class ScanEngine:
         # Save partial results
         try:
             self._save_checkpoint()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         sys.exit(255)
 
@@ -395,8 +399,8 @@ class ScanEngine:
                                     "issues": token.issues,
                                 }
                             )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("swallowed: %s", exc)
             if jwt_found:
                 self.report.add_finding(
                     Finding(
@@ -609,8 +613,8 @@ class ScanEngine:
                                 raw_preview=value[:40] + "...",
                             )
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("swallowed: %s", exc)
 
         # Add cookies as sessions
         from auth_scan.core.attack_surface import ModelSession

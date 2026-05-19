@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -17,6 +18,8 @@ from auth_scan.core.session import (
     analyze_session_id_entropy,
     find_session_ids_in_content,
 )
+
+_log = logging.getLogger(__name__)
 
 
 class SessionTester(BaseAttackModule):
@@ -220,8 +223,8 @@ class SessionTester(BaseAttackModule):
                         tags=["session", "fixation"],
                     )
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -293,8 +296,8 @@ class SessionTester(BaseAttackModule):
                         )
                     )
                     break  # Found one, no need to check more
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return findings
 

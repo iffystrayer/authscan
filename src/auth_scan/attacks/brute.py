@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,8 @@ DEFAULT_CREDENTIALS: list[tuple[str, str]] = [
     ("test", ""),
     ("administrator", ""),
 ]
+
+_log = logging.getLogger(__name__)
 
 
 class BruteForce(BaseAttackModule):
@@ -207,8 +210,8 @@ class BruteForce(BaseAttackModule):
                     stripped = line.strip()
                     if stripped and not stripped.startswith("#"):
                         entries.append(stripped)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("swallowed: %s", exc)
         return entries
 
     def _fetch_hidden_fields(

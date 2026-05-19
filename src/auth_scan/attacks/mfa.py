@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -31,6 +32,8 @@ MFA_KEYWORDS = [
     "backup code",
     "recovery code",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 class MfaBypass(BaseAttackModule):
@@ -189,8 +192,8 @@ class MfaBypass(BaseAttackModule):
                             tags=["mfa", "bypass", "direct-access"],
                         )
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -231,8 +234,8 @@ class MfaBypass(BaseAttackModule):
                             tags=["mfa", "bypass", "response-manipulation"],
                         )
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -278,8 +281,8 @@ class MfaBypass(BaseAttackModule):
                                 tags=["mfa", "bypass", "parameter-pollution"],
                             )
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("swallowed: %s", exc)
 
         return findings
 
@@ -312,8 +315,8 @@ class MfaBypass(BaseAttackModule):
                         fast_429 += 1
                     if fast_429 >= 2:
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("swallowed: %s", exc)
 
             if fast_429 >= 2:
                 findings.append(
