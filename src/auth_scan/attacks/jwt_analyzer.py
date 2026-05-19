@@ -51,6 +51,11 @@ class JWTAnalyzer(BaseAttackModule):
         result = ModuleResult()
         jwt_tokens: list[TokenInfo] = []
 
+        # L5: cache unauthenticated GETs by (method, url, frozenset(headers))
+        # for this scan run so the per-token alg=none / key-confusion / claims
+        # checks don't redundantly hit the same probe endpoints.
+        self._response_cache: dict[tuple, Any] = {}
+
         # FR-JWT-001: Discover JWTs from probe metadata and make exploratory requests
         jwt_tokens.extend(self._discover_jwts(report, http_client))
 
@@ -111,6 +116,40 @@ class JWTAnalyzer(BaseAttackModule):
 
         result.state_update["jwt_tokens_analyzed"] = len(jwt_tokens)
         return result
+
+    def _cached_get(
+        self,
+        http_client: Any,
+        url: str,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """Cached GET for the JWT module's exploratory probes (L5).
+
+        Multiple per-token tests (alg=none baseline, key-confusion baseline,
+        claims discovery) issue GETs against the same handful of endpoints
+        with the same header set. Memoise by ``(url, frozenset(headers))``
+        so each unique pair hits the network once per scan. Errors are
+        cached as ``None`` so a known-bad endpoint isn't re-probed.
+        """
+        cache = getattr(self, "_response_cache", None)
+        if cache is None:
+            return self._raw_get(http_client, url, headers)
+        key = (url, frozenset((headers or {}).items()))
+        if key in cache:
+            return cache[key]
+        resp = self._raw_get(http_client, url, headers)
+        cache[key] = resp
+        return resp
+
+    @staticmethod
+    def _raw_get(http_client: Any, url: str, headers: dict[str, str] | None) -> Any:
+        try:
+            if headers:
+                return http_client.get(url, headers=headers)
+            return http_client.get(url)
+        except Exception as exc:
+            _log.debug("cached_get failed for %s: %s", url, exc)
+            return None
 
     def _discover_jwts(self, report: ScanReport, http_client: Any) -> list[TokenInfo]:
         """Discover JWT tokens from various locations."""
@@ -216,21 +255,23 @@ class JWTAnalyzer(BaseAttackModule):
 
             for endpoint in ["/api/profile", "/api/user", "/api/me", "/"]:
                 try:
-                    # 1) Baseline with the real token.
-                    baseline = None
-                    try:
-                        baseline = http_client.get(
-                            endpoint,
-                            headers={"Authorization": f"Bearer {original_jwt}"},
-                        )
-                    except Exception:
-                        baseline = None
+                    # 1) Baseline with the real token. Cached so the same
+                    #    (endpoint, token) pair isn't re-probed by other
+                    #    per-token tests this run. L5.
+                    baseline = self._cached_get(
+                        http_client,
+                        endpoint,
+                        headers={"Authorization": f"Bearer {original_jwt}"},
+                    )
 
                     # 2) Forge with alg=none.
-                    resp = http_client.get(
+                    resp = self._cached_get(
+                        http_client,
                         endpoint,
                         headers={"Authorization": f"Bearer {none_jwt}"},
                     )
+                    if resp is None:
+                        continue
 
                     if resp.status_code != 200:
                         continue
@@ -406,7 +447,8 @@ class JWTAnalyzer(BaseAttackModule):
 
     def _fetch_public_key(self, http_client: Any, target: str, token: TokenInfo) -> str | None:
         """Try to fetch the public key from JWKS endpoint or token header."""
-        # Try JWKS endpoint
+        # Try JWKS endpoint. Cached so multiple tokens with different kids
+        # don't all re-probe the same /jwks.json. L5.
         for jwks_url in [
             "/.well-known/jwks.json",
             "/.well-known/openid-configuration/jwks",
@@ -414,7 +456,9 @@ class JWTAnalyzer(BaseAttackModule):
             "/api/jwks",
         ]:
             try:
-                resp = http_client.get(jwks_url)
+                resp = self._cached_get(http_client, jwks_url)
+                if resp is None:
+                    continue
                 if resp.status_code == 200:
                     jwks = resp.json()
                     keys = jwks.get("keys", [])
@@ -767,7 +811,15 @@ class JWTAnalyzer(BaseAttackModule):
         token: TokenInfo,
         config: Any,
     ) -> list[Finding]:
-        """Attempt offline HMAC secret cracking using a wordlist."""
+        """Attempt offline HMAC secret cracking using a wordlist.
+
+        Cracking is now **opt-in** (L4). It was always-on previously, with
+        up to 5000 attempts per token — surprising CPU spend on scans that
+        included many JWTs. Operators turn it on with
+        ``ScanConfig.jwt_crack = True`` (or ``--jwt-crack``) and can tune
+        ``jwt_crack_max_attempts`` (default 5000). The runtime cost is
+        reported via a finding when cracking runs but doesn't find a hit.
+        """
         findings: list[Finding] = []
 
         if not token.is_jwt or not token.algorithm:
@@ -775,6 +827,10 @@ class JWTAnalyzer(BaseAttackModule):
 
         alg = token.algorithm.upper()
         if not alg.startswith("HS"):
+            return findings
+
+        # L4 — gate on explicit opt-in.
+        if not getattr(config, "jwt_crack", False):
             return findings
 
         hash_funcs = {"HS256": "sha256", "HS384": "sha384", "HS512": "sha512"}
@@ -792,7 +848,8 @@ class JWTAnalyzer(BaseAttackModule):
         if not wordlist:
             wordlist = self.JWT_SECRET_WORDLIST
 
-        max_attempts = min(len(wordlist), 5000)
+        configured_max = int(getattr(config, "jwt_crack_max_attempts", 5000) or 5000)
+        max_attempts = min(len(wordlist), max(1, configured_max))
         parts = token.raw.split(".")
         signing_input = f"{parts[0]}.{parts[1]}".encode()
 
