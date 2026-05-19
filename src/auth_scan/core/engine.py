@@ -195,6 +195,10 @@ class ScanEngine:
                 "agentic": self.config.agentic,
             }
 
+            # Surface the endpoint count so reporters / external tooling
+            # don't have to dig into the engine. L10.
+            self.report.metadata["endpoints_tested"] = self._endpoints_tested
+
             # Mark complete
             self.report.status = "completed"
             self.report.completed_at = datetime.now(timezone.utc)

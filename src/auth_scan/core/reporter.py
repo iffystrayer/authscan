@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re as _re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -508,6 +510,32 @@ class SarifReporter:
         return json.dumps(sarif, indent=2)
 
 
+def _slugify_target(target: str) -> str:
+    """Produce a filesystem-safe slug for a target URL (L9).
+
+    The previous slug replaced ``://`` and ``/`` only, then truncated at
+    50 chars. Query strings, fragments, percent-encoding, and Windows
+    reserved characters all leaked through unchanged, sometimes
+    producing colliding or unwritable filenames. The new slug:
+
+      * Keeps ``[A-Za-z0-9._-]`` verbatim.
+      * Replaces every other character with ``_`` (collapsing runs).
+      * Strips trailing dots / underscores / hyphens.
+      * Caps the readable portion at 80 chars.
+      * Appends an 8-hex-digit SHA-1 suffix of the full original target
+        so distinct targets that slug to the same prefix don't collide.
+
+    Returns ``"target"`` if the input slugs to the empty string.
+    """
+    if not target:
+        return "target"
+    slug = _re.sub(r"[^A-Za-z0-9._-]+", "_", target).strip("._-")
+    if not slug:
+        slug = "target"
+    suffix = hashlib.sha1(target.encode("utf-8")).hexdigest()[:8]
+    return f"{slug[:80]}_{suffix}"
+
+
 def _sanitize_rule_id(title: str) -> str:
     """Convert a finding title to a safe rule ID component."""
     import re
@@ -555,7 +583,7 @@ class Reporter:
         """
         results: dict[str, str] = {}
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-T%H%M%SZ")
-        safe_target = target.replace("https://", "").replace("http://", "").replace("/", "-")[:50]
+        safe_target = _slugify_target(target)
         # Only create the directory when we're going to use it.
         if not output_file:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
