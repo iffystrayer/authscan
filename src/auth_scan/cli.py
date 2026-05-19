@@ -190,6 +190,14 @@ class AuthScanCommand(click.Command):
     ),
 )
 @click.option(
+    "--allow-private-redirects",
+    is_flag=True,
+    help=(
+        "Tolerate redirects to loopback / RFC1918 / cloud-metadata hosts. "
+        "Off by default (SSRF guard). Enable for intranet engagements."
+    ),
+)
+@click.option(
     "--output-dir",
     type=click.Path(file_okay=False),
     default="./scan-results",
@@ -293,6 +301,7 @@ def main(
     no_verify: bool,
     ca_bundle: str | None,
     allow_http_fallback: bool,
+    allow_private_redirects: bool,
     output_dir: str,
     output_file: str | None,
     init_config: bool,
@@ -376,6 +385,8 @@ def main(
             config.ca_bundle = ca_bundle
         if allow_http_fallback:
             config.allow_http_fallback = True
+        if allow_private_redirects:
+            config.allow_private_redirects = True
         if cookies_dict:
             config.cookies.update(cookies_dict)
         if headers_dict:

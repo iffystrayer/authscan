@@ -118,6 +118,11 @@ class ScanConfig:
     # fails (legacy auth-scan behaviour). Off by default so credentials
     # never silently travel in plaintext. See PR-3 / H4.
     allow_http_fallback: bool = False
+    # When True, the HTTP client tolerates redirects whose target is a
+    # loopback / RFC1918 / cloud-metadata host. Off by default (C5);
+    # opt in for intranet engagements or integration tests that bind to
+    # 127.0.0.1.
+    allow_private_redirects: bool = False
 
     # Authentication
     auth_type: str = ""  # bearer, basic, form, cookie
@@ -321,6 +326,7 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
         "no_verify",
         "ca_bundle",
         "allow_http_fallback",
+        "allow_private_redirects",
         "no_redact",
         "no_color",
         "verbose",

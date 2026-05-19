@@ -577,6 +577,137 @@ def backup_page():
     return "Backup directory", 403
 
 
+# ── Phase-B test endpoints ─────────────────────────────────────
+#
+# These exist purely so the end-to-end integration suite has live
+# targets for code paths that were previously only exercised via
+# ``responses``-mocked fixtures: C4 (CSRF rotation), Bearer-JWT auth,
+# and a JWKS endpoint with real RSA material.
+
+
+# Rotating CSRF token (C4 fixture). Each GET issues a new token; POSTs
+# that don't carry the most recent one are 403'd. ``BruteForce`` must
+# refresh per-attempt to succeed.
+_CSRF_TOKEN_LATEST = {"value": ""}
+
+
+@app.route("/csrf-login", methods=["GET", "POST"])
+def csrf_login():
+    """Rotating-CSRF login form for C4 integration."""
+    if request.method == "POST":
+        submitted = request.form.get("csrf_token", "")
+        if submitted != _CSRF_TOKEN_LATEST["value"]:
+            return "stale csrf", 403
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if USERS.get(username) == password:
+            return f"Welcome, {username}!", 200
+        return "Invalid credentials", 401
+
+    # GET: mint a fresh token and embed it.
+    token = uuid.uuid4().hex
+    _CSRF_TOKEN_LATEST["value"] = token
+    return (
+        "<html><body><form method='POST' action='/csrf-login'>"
+        f"<input type='hidden' name='csrf_token' value='{token}'>"
+        "<input name='username'>"
+        "<input name='password' type='password'>"
+        "<button>Go</button></form></body></html>",
+        200,
+        {"Content-Type": "text/html"},
+    )
+
+
+# Bearer-JWT-only protected resource. Lets ``_test_alg_none`` baseline
+# against a clear 200/401 boundary that's easier to assert on than the
+# cookie-driven /api/profile.
+@app.route("/api/protected")
+def api_protected():
+    """Requires Authorization: Bearer <jwt>. alg=none is accepted."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return jsonify({"error": "missing token"}), 401
+    token = auth.split(None, 1)[1].strip()
+    payload = verify_jwt(token)
+    if payload is None:
+        return jsonify({"error": "invalid token"}), 401
+    # Same auth-bypass as /api/profile: alg=none decodes here too.
+    return jsonify({"sub": payload.get("sub"), "role": payload.get("role")}), 200
+
+
+# JWKS with a real RSA public key. Private counterpart is held in
+# memory and used to sign tokens served by /api/rs256-token. This makes
+# the RS256 → HS256 key-confusion attack reachable end-to-end.
+_RSA_KEY_CACHE: dict[str, object] = {}
+
+
+def _ensure_rsa_keypair():
+    """Generate a deterministic-enough RSA key pair on first use.
+
+    We don't seed it — the keypair is regenerated per process — but it
+    only lives for the test run, so determinism isn't required. The
+    cost (~80 ms) is paid lazily on the first /api/jwks.json request.
+    """
+    if "private" in _RSA_KEY_CACHE:
+        return _RSA_KEY_CACHE
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    _RSA_KEY_CACHE["private"] = private_key
+    _RSA_KEY_CACHE["public"] = private_key.public_key()
+    return _RSA_KEY_CACHE
+
+
+def _b64url_uint(value: int) -> str:
+    """Encode an unsigned int as base64url-without-padding (JWK n/e form)."""
+    length = (value.bit_length() + 7) // 8 or 1
+    raw = value.to_bytes(length, "big")
+    return base64url_encode(raw)
+
+
+@app.route("/api/jwks.json")
+def api_jwks():
+    """Publish the RSA public key for the RS256 → HS256 confusion test."""
+    _ensure_rsa_keypair()
+    pub = _RSA_KEY_CACHE["public"]
+    nums = pub.public_numbers()  # type: ignore[union-attr]
+    return jsonify(
+        {
+            "keys": [
+                {
+                    "kty": "RSA",
+                    "kid": "vuln-app-rs256",
+                    "use": "sig",
+                    "alg": "RS256",
+                    "n": _b64url_uint(nums.n),
+                    "e": _b64url_uint(nums.e),
+                }
+            ]
+        }
+    )
+
+
+@app.route("/api/rs256-token")
+def api_rs256_token():
+    """Mint an RS256-signed JWT using the JWKS-published public key."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    _ensure_rsa_keypair()
+    private_key = _RSA_KEY_CACHE["private"]
+    header = {"alg": "RS256", "typ": "JWT", "kid": "vuln-app-rs256"}
+    payload = {"sub": "rs256-user", "iat": int(datetime.datetime.now().timestamp())}
+    header_b64 = base64url_encode(json.dumps(header).encode())
+    payload_b64 = base64url_encode(json.dumps(payload).encode())
+    signing_input = f"{header_b64}.{payload_b64}".encode()
+    sig = private_key.sign(  # type: ignore[union-attr]
+        signing_input,
+        padding.PKCS1v15(),
+        hashes.SHA256(),
+    )
+    return jsonify({"token": f"{header_b64}.{payload_b64}.{base64url_encode(sig)}"})
+
+
 # ── Health Check ───────────────────────────────────────────────
 
 

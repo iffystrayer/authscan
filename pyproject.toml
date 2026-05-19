@@ -129,4 +129,10 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+# Default to skipping integration tests (they spawn a real Flask process
+# and take ~5s of startup). Run them via ``pytest -m slow`` or
+# ``make integration``.
+addopts = "-v --tb=short -m 'not slow'"
+markers = [
+    "slow: end-to-end integration tests; opt-in via -m slow",
+]

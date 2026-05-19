@@ -35,3 +35,10 @@ python app.py
 10. Sensitive data in JWT payload (email, role)
 11. Missing security headers (HSTS, CSP, etc.)
 12. Session ID in URL query parameter
+13. **CSRF-rotating login at /csrf-login** — POST without the most-recent token is 403'd. Exercises auth-scan's per-attempt token refresh (C4).
+14. **Bearer-JWT-only resource at /api/protected** — accepts alg=none; lets the JWT module's baseline comparison run against a real 200/401 boundary.
+15. **Live JWKS at /api/jwks.json** + matching RS256 issuer at /api/rs256-token — unblocks integration coverage for the RS256 → HS256 key-confusion path.
+
+## Running it under integration tests
+
+`make integration` (or `pytest -m slow`) starts this app on an ephemeral port and runs ScanEngine against it. The Flask process is shared across all tests in the run via a session-scoped fixture; teardown SIGTERMs the child.

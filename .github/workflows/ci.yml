@@ -48,3 +48,28 @@ jobs:
 
       - name: Mypy (advisory)
         run: uv run mypy src/ || true
+
+  integration:
+    # Live end-to-end scan against tests/fixtures/vuln_app. Heavier than
+    # the unit suite (~10s incl. Flask startup) so we only run it on
+    # main and on PRs that explicitly opt in via the "integration" label.
+    name: integration (vuln_app)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'integration')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dev environment
+        run: uv sync --group dev --python 3.12
+
+      - name: Integration tests
+        run: uv run pytest -m slow tests/integration/

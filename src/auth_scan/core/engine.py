@@ -154,6 +154,7 @@ class ScanEngine:
             cookies=self.config.cookies,
             headers=self.config.headers,
             allow_http_fallback=getattr(self.config, "allow_http_fallback", False),
+            allow_private_redirects=getattr(self.config, "allow_private_redirects", False),
         )
         return self.http
 
