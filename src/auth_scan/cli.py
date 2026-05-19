@@ -480,7 +480,7 @@ def main(
 
     saved_paths = reporter.render(
         report=report,
-        endpoints_tested=0,  # TODO: track from engine
+        endpoints_tested=int(report.metadata.get("endpoints_tested", 0) or 0),
         output_dir=config.output_dir,
         target=config.target,
         output_file=config.output_file or None,
