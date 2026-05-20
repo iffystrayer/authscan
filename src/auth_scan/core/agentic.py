@@ -493,29 +493,52 @@ class OODAEngine:
             # Orient
             assessment = self.orient()
 
-            # Check termination conditions
-            if self.model.confidence >= threshold:
-                self.decision_trail.append(
-                    DecisionRecord(
-                        cycle=self.cycle,
-                        phase="decide",
-                        action="conclude",
-                        reasoning=f"Confidence {self.model.confidence:.2f} >= threshold {threshold}.",
-                    )
-                )
-                break
-
-            # M4: derive the termination set from the live module_map
-            # instead of a hardcoded list. This ensures plugin-registered
-            # modules also get exercised before the agent concludes.
+            # Check termination conditions.
+            #
+            # Inversion (P1 #3, 2026-05-19): modules-exhausted is the *primary*
+            # exit; confidence is only a tie-breaker that can fire AFTER every
+            # registered module has run.
+            #
+            # Why it was wrong before: ``estimate_confidence()`` hits ~0.95 on
+            # any target with a probe + JWT cookie + session cookie + tested
+            # endpoints — i.e. after only 2-3 module runs. With the confidence
+            # check ahead of the modules-exhausted check, ``--agentic`` was
+            # terminating before exercising oauth/mfa/api_key/websocket on
+            # targets where those modules would have found real issues. Net
+            # result: ``--agentic`` produced FEWER findings than the default
+            # scan, which is exactly the opposite of what the flag promises.
+            #
+            # M4: derive the termination set from the live module_map instead
+            # of a hardcoded list. This ensures plugin-registered modules also
+            # get exercised before the agent concludes.
             all_modules = set(module_map.keys())
-            if all_modules and not assessment["gaps"] and self._modules_run >= all_modules:
+            modules_exhausted = bool(all_modules) and self._modules_run >= all_modules
+
+            if modules_exhausted and not assessment["gaps"]:
                 self.decision_trail.append(
                     DecisionRecord(
                         cycle=self.cycle,
                         phase="decide",
                         action="conclude",
                         reasoning="No gaps remaining and all registered modules exhausted.",
+                    )
+                )
+                break
+
+            # Confidence-based early exit: only allowed once every module has
+            # had a chance to run. This preserves "stop sooner if certain"
+            # semantics while guaranteeing module coverage matches (or beats)
+            # the default scan.
+            if modules_exhausted and self.model.confidence >= threshold:
+                self.decision_trail.append(
+                    DecisionRecord(
+                        cycle=self.cycle,
+                        phase="decide",
+                        action="conclude",
+                        reasoning=(
+                            f"All modules run and confidence {self.model.confidence:.2f} "
+                            f">= threshold {threshold}."
+                        ),
                     )
                 )
                 break

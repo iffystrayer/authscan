@@ -282,6 +282,116 @@ class TestRunLoop:
 
         run()
 
+    def test_confidence_does_not_terminate_before_all_modules_run(self) -> None:
+        """PR-14: --agentic must run every registered module before allowing
+        a confidence-based exit.
+
+        Repro of the 2026-05-19 demo bug: ``estimate_confidence()`` hits ~0.95
+        after just probe + 1-2 modules on any target that exposes JWT cookies
+        + sessions + tested endpoints. With the old ordering, the confidence
+        check at the top of the loop terminated the agent before oauth /
+        api_key / mfa / websocket ran — producing FEWER findings than the
+        default scan. The fix inverts priority: modules-exhausted is the
+        primary exit; confidence is only a tie-breaker after every module
+        has run.
+        """
+        model = AttackSurfaceModel(target="https://example.com")
+        model.mark_module_run("probe")
+        # Lower the threshold so even the smallest amount of work clears it.
+        # If the bug were still present, the first module's confidence bump
+        # would trigger termination before the others ran.
+        config = ScanConfig(
+            target="https://example.com",
+            modules=["jwt", "session", "oauth", "api_key"],
+            confidence_threshold=0.20,
+        )
+        report = ScanReport(target="https://example.com")
+        modules_called: list[str] = []
+
+        def _make_fake(name_: str, priority_: int):
+            class _Fake:
+                name = name_
+                priority = priority_
+
+                def run(self, target, http_client, report, config):
+                    modules_called.append(name_)
+                    return ModuleResult(
+                        findings=[
+                            Finding(
+                                title=f"{name_} ran",
+                                severity=Severity.INFO,
+                                module_name=name_,
+                                tags=[name_],
+                            )
+                        ]
+                    )
+
+            return _Fake
+
+        @responses.activate
+        def run():
+            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+            ooda = OODAEngine(model, config, client)
+            module_map = {
+                "jwt": _make_fake("jwt", 10),
+                "session": _make_fake("session", 20),
+                "oauth": _make_fake("oauth", 30),
+                "api_key": _make_fake("api_key", 40),
+            }
+            ooda.run_loop(module_map, report, max_cycles=20)
+
+            # Every configured module must have run, regardless of how high
+            # confidence climbed during the loop.
+            assert set(modules_called) == {"jwt", "session", "oauth", "api_key"}, (
+                f"expected all modules to run, got {modules_called}"
+            )
+
+        run()
+
+    def test_confidence_exit_allowed_after_modules_exhausted(self) -> None:
+        """The confidence-based exit is still available — just *after* every
+        module has run. Asserts the decision trail records a confidence-based
+        conclusion when the threshold is met post-exhaustion."""
+        model = AttackSurfaceModel(target="https://example.com")
+        model.mark_module_run("probe")
+        config = ScanConfig(
+            target="https://example.com",
+            modules=["jwt"],
+            confidence_threshold=0.10,
+        )
+        report = ScanReport(target="https://example.com")
+
+        class _FakeJwt:
+            name = "jwt"
+            priority = 10
+
+            def run(self, target, http_client, report, config):
+                # Give the model enough state to push confidence past 0.10.
+                return ModuleResult(
+                    findings=[
+                        Finding(
+                            title="JWT Found",
+                            severity=Severity.INFO,
+                            evidence={"algorithm": "HS256", "location": "cookie"},
+                            module_name="jwt",
+                            tags=["jwt", "discovery"],
+                        )
+                    ]
+                )
+
+        @responses.activate
+        def run():
+            client = HTTPClient(base_url="https://example.com", rate_limit=100)
+            ooda = OODAEngine(model, config, client)
+            final = ooda.run_loop({"jwt": _FakeJwt}, report, max_cycles=10)
+            # Trail should contain a conclude entry — either confidence-based
+            # or gaps-exhausted — that fired AFTER jwt ran.
+            concludes = [d for d in final.decision_trail if d["action"] == "conclude"]
+            assert concludes, "loop should have concluded explicitly"
+            assert "jwt" in ooda._modules_run, "jwt must run before any conclusion"
+
+        run()
+
     def test_decision_trail_structure(self) -> None:
         model = AttackSurfaceModel(target="https://example.com")
         model.mark_module_run("probe")
