@@ -601,6 +601,38 @@ class OODAEngine:
         - missing_state + open_redirect → oauth_csrf
         - missing_httponly + xss_related → session_hijacking
         - apikey_in_source + unscoped_key → privilege_escalation
+
+        Confidence model (PR-15, 2026-05-19)
+        ------------------------------------
+        Per-finding ``confidence`` ∈ [0, 1] reflects *detector reliability* —
+        how likely is this finding to be a true positive given the evidence
+        we observed. It is set per-Finding by the originating module. The
+        target floors are:
+
+        - ≥ 0.9  : strong direct observation with low false-positive risk
+                  (cracked secret, accepted weak creds, missing security
+                  header, exposed /.env on 200).
+        - 0.80-0.89 : reliable binary detection where the evidence is
+                  explicit but inference is needed (PKCE absence,
+                  MFA body manipulation accepted, session not invalidated
+                  on logout, user-enum via ≥2 unique error keywords).
+        - 0.60-0.79 : heuristic with non-trivial false-positive risk
+                  (scope acceptance ≠ proven escalation, MFA bypass via
+                  param injection).
+        - ≤ 0.5 : soft signal — timing-based, library-unavailable, manual
+                  verification required.
+
+        Chain confidence = ``min(children.confidence) * penalty`` where
+        ``penalty`` ∈ [0.85, 0.9] captures the inferential risk that the
+        chain itself doesn't fire (the constituents existing doesn't strictly
+        prove the combined exploit works). Math implication: even with two
+        strong detectors at 1.0, the chain caps at 0.9 — chains are *always*
+        rated less certain than their best constituent, by design.
+
+        With the PR-15 floor adjustments, the canonical account-takeover
+        chain (user-enum 0.9, weak-creds 0.95, penalty 0.9) now lands at
+        0.81 — defensible "high-confidence exploit chain" territory rather
+        than the pre-PR-15 0.63 that looked like a hedge.
         """
         chains: list[Finding] = []
 

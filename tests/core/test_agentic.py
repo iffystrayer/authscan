@@ -323,11 +323,13 @@ class TestChainSynthesis:
         config = ScanConfig(target="https://example.com")
         report = ScanReport(target="https://example.com")
 
+        # Fixture uses the post-PR-15 floor of 0.9 for user-enumeration.
+        # The chain assertion below pins the documented confidence range.
         report.add_finding(
             Finding(
                 title="User Enumeration Possible",
                 severity=Severity.MEDIUM,
-                confidence=0.7,
+                confidence=0.9,
                 module_name="brute",
                 tags=["brute", "user-enumeration"],
             )
@@ -353,6 +355,12 @@ class TestChainSynthesis:
             assert len(takeover) >= 1
             assert takeover[0].severity == Severity.CRITICAL
             assert "user_enumeration" in takeover[0].evidence.get("attack_path", "")
+            # PR-15: with the user-enum floor at 0.9 and weak-creds at 0.95,
+            # the chain should land at min(0.9, 0.95) * 0.9 = 0.81. This pins
+            # the documented "high-confidence exploit chain" range.
+            assert takeover[0].confidence == 0.81, (
+                f"chain confidence drifted: expected 0.81 per PR-15 model, got {takeover[0].confidence}"
+            )
 
         run()
 

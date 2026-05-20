@@ -291,7 +291,7 @@ class SessionTester(BaseAttackModule):
                             "Clear the session cookie with Set-Cookie: session=; Max-Age=0.",
                             cwe_id="CWE-613",
                             module_name=self.name,
-                            confidence=0.7,
+                            confidence=0.85,
                             tags=["session", "invalidation"],
                         )
                     )
