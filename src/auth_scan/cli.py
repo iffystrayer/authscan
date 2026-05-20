@@ -128,6 +128,38 @@ class AuthScanCommand(click.Command):
     help="Bearer token or API key for authenticated scanning.",
 )
 @click.option(
+    "--login-url",
+    help=(
+        "Form-login POST endpoint. Required when --auth-type=form. "
+        "Combined with --username/--password to authenticate before "
+        "attack modules run."
+    ),
+)
+@click.option(
+    "--login-field-username",
+    "login_field_username",
+    default="username",
+    show_default=True,
+    help="Form field name for the username (default: 'username').",
+)
+@click.option(
+    "--login-field-password",
+    "login_field_password",
+    default="password",
+    show_default=True,
+    help="Form field name for the password (default: 'password').",
+)
+@click.option(
+    "--login-success",
+    "login_success",
+    help=(
+        "How to detect a successful login. One of: "
+        "'status=302' / 'redirect=/dashboard' / 'cookie=session' / 'body=Welcome'. "
+        "Defaults to the cookie-diff heuristic (any new or changed cookie "
+        "with a 200/3xx response counts as success)."
+    ),
+)
+@click.option(
     "--wordlist",
     "-w",
     type=click.Path(exists=True, dir_okay=False),
@@ -290,6 +322,10 @@ def main(
     username: str | None,
     password: str | None,
     token: str | None,
+    login_url: str | None,
+    login_field_username: str,
+    login_field_password: str,
+    login_success: str | None,
     wordlist: str | None,
     user_wordlist: str | None,
     scope: tuple[str, ...],
@@ -399,6 +435,14 @@ def main(
             config.auth_credentials["password"] = password
         if token is not None:
             config.auth_credentials["token"] = token
+        if login_url is not None:
+            config.login_url = login_url
+        if login_field_username != "username":
+            config.login_username_field = login_field_username
+        if login_field_password != "password":
+            config.login_password_field = login_field_password
+        if login_success is not None:
+            config.login_success_indicator = login_success
         if scope:
             config.scope_allow = list(scope)
         if wordlist:

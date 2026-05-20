@@ -127,6 +127,16 @@ class ScanConfig:
     # Authentication
     auth_type: str = ""  # bearer, basic, form, cookie
     auth_credentials: dict[str, str] = field(default_factory=dict)
+    # Form-login phase (PR-16, P1 #5). Only consulted when auth_type=='form'.
+    # login_url is the POST endpoint; field names default to "username" /
+    # "password" but most real apps need overrides. login_success_indicator
+    # is optional — empty means use the cookie-diff heuristic (any new or
+    # changed cookie + 200/3xx status counts as a successful login). See
+    # core/login.py for the indicator string format.
+    login_url: str = ""
+    login_username_field: str = "username"
+    login_password_field: str = "password"
+    login_success_indicator: str = ""
 
     # Scope
     scope_allow: list[str] = field(default_factory=list)
@@ -346,6 +356,10 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
         "no_mfa",
         "oauth_scope",
         "output_file",
+        "login_url",
+        "login_username_field",
+        "login_password_field",
+        "login_success_indicator",
     ]
     for field_name in simple_fields:
         if field_name in d:
@@ -366,6 +380,15 @@ def _dict_to_config(d: dict[str, Any]) -> ScanConfig:
         if isinstance(auth, dict):
             cfg.auth_type = auth.get("type", "")
             cfg.auth_credentials = auth.get("credentials", {})
+            # PR-16: form-login phase sub-block under auth.login.
+            login = auth.get("login")
+            if isinstance(login, dict):
+                cfg.login_url = login.get("url", "") or cfg.login_url
+                cfg.login_username_field = login.get("username_field", "") or cfg.login_username_field
+                cfg.login_password_field = login.get("password_field", "") or cfg.login_password_field
+                cfg.login_success_indicator = (
+                    login.get("success_indicator", "") or cfg.login_success_indicator
+                )
 
     # Scope
     if "scope" in d:
