@@ -80,6 +80,55 @@ class TestJwtCrackOptIn:
         assert findings == []
 
 
+# ---- PR-13: description-string redaction for the cracked HMAC secret -------
+#
+# The 2026-05-19 live demo showed that --no-redact leaked the cracked JWT
+# secret via the *description* string even though evidence.secret stayed
+# [REDACTED]. The fix mirrors the brute-force C1 pattern: pull
+# config.no_redact into self._no_redact and gate the description's literal
+# secret interpolation on it. These tests pin that contract.
+
+
+class TestJwtCrackedSecretRedaction:
+    """JWT secret must not leak via description in the default (redacted) mode."""
+
+    SECRET = "weak-secret-12345"
+
+    def _crack(self, *, no_redact: bool) -> list:
+        analyzer = JWTAnalyzer()
+        analyzer.JWT_SECRET_WORDLIST = [self.SECRET]
+        token = _make_hs256_token(self.SECRET)
+
+        class _Cfg:
+            pass
+
+        cfg = _Cfg()
+        cfg.jwt_crack = True
+        cfg.jwt_crack_max_attempts = 100
+        cfg.no_redact = no_redact
+        # Match the priming run() does on self._no_redact.
+        analyzer._no_redact = bool(no_redact)
+        return analyzer._crack_hmac_secret(token, cfg)
+
+    def test_default_description_does_not_leak_secret(self) -> None:
+        findings = self._crack(no_redact=False)
+        assert findings, "secret should still be cracked even when redacting"
+        f = findings[0]
+        assert self.SECRET not in f.description
+        assert "[REDACTED]" in f.description
+        # Evidence honors the same flag.
+        assert f.evidence["secret"] == "[REDACTED]"
+        # secret_length still reported so operators see how weak it was.
+        assert f.evidence["secret_length"] == len(self.SECRET)
+
+    def test_no_redact_restores_secret_in_description(self) -> None:
+        findings = self._crack(no_redact=True)
+        assert findings, "secret should still be cracked under --no-redact"
+        f = findings[0]
+        assert self.SECRET in f.description
+        assert f.evidence["secret"] == self.SECRET
+
+
 # ---- L5: endpoint-probe caching -------------------------------------------
 
 
