@@ -541,7 +541,7 @@ class BruteForce(BaseAttackModule):
                         "(e.g., 'Invalid username or password').",
                         cwe_id="CWE-204",
                         module_name=self.name,
-                        confidence=0.7,
+                        confidence=0.9,
                         tags=["brute", "user-enumeration"],
                     )
                 )

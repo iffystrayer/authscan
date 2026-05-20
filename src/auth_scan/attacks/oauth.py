@@ -383,7 +383,7 @@ class OAuthTester(BaseAttackModule):
                             ),
                             cwe_id="CWE-862",
                             module_name=self.name,
-                            confidence=0.75,
+                            confidence=0.85,
                             tags=["oauth", "pkce"],
                         )
                     )

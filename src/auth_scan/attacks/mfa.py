@@ -230,7 +230,7 @@ class MfaBypass(BaseAttackModule):
                                 "Maintain MFA status server-side in the session."
                             ),
                             module_name=self.name,
-                            confidence=0.7,
+                            confidence=0.85,
                             tags=["mfa", "bypass", "response-manipulation"],
                         )
                     )
