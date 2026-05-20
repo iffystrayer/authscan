@@ -41,6 +41,9 @@ class JWTAnalyzer(BaseAttackModule):
     version = "1.0.0"
     priority = 10
 
+    # Set in run() from config.no_redact. Default redacts (safe).
+    _no_redact: bool = False
+
     def run(
         self,
         target: str,
@@ -50,6 +53,12 @@ class JWTAnalyzer(BaseAttackModule):
     ) -> ModuleResult:
         result = ModuleResult()
         jwt_tokens: list[TokenInfo] = []
+
+        # Track redaction mode from config so description strings AND evidence
+        # dicts honor --no-redact. Default to redacted when the attribute is
+        # absent. Without this, the cracked-secret description leaks the
+        # plaintext secret even when evidence.secret is [REDACTED].
+        self._no_redact = bool(getattr(config, "no_redact", False))
 
         # L5: cache unauthenticated GETs by (method, url, frozenset(headers))
         # for this scan run so the per-token alg=none / key-confusion / claims
@@ -868,14 +877,18 @@ class JWTAnalyzer(BaseAttackModule):
             try:
                 computed_sig = hmac.new(secret.encode(), signing_input, hash_name).digest()
                 if hmac.compare_digest(computed_sig, target_sig_raw):
+                    secret_for_description = secret if self._no_redact else "[REDACTED]"
                     findings.append(
                         Finding(
                             title=f"JWT HMAC Secret Cracked ({alg})",
-                            description=f"The JWT HS256 secret was cracked: '{secret}'. Attackers can forge arbitrary tokens.",
+                            description=(
+                                f"The JWT {alg} secret was cracked: '{secret_for_description}'. "
+                                "Attackers can forge arbitrary tokens."
+                            ),
                             severity=Severity.CRITICAL,
                             evidence={
                                 "algorithm": alg,
-                                "secret": "[REDACTED]",
+                                "secret": secret if self._no_redact else "[REDACTED]",
                                 "secret_length": len(secret),
                             },
                             remediation="Use a strong random secret (256+ bits). Use RS256/ES256 for distributed systems.",

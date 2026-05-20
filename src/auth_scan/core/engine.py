@@ -448,7 +448,12 @@ class ScanEngine:
 
                 path_results = discover_paths(self.http, timeout_per=3)
                 self.report.metadata["path_results"] = path_results
-                report_discoveries(self.report.findings, path_results, module_name="path_discovery")
+                report_discoveries(
+                    self.report.findings,
+                    path_results,
+                    module_name="path_discovery",
+                    target_url=self.config.target,
+                )
                 self._endpoints_tested += len(path_results)
 
         except HttpError as e:
