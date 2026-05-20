@@ -158,6 +158,201 @@ class ScanEngine:
         )
         return self.http
 
+    def _apply_auth_phase(self) -> None:
+        """Authenticate against the target before attack modules run.
+
+        Three modes, gated on ``config.auth_type``:
+
+        - ``form``: POST credentials to ``config.login_url``, capture
+          cookies (and any bearer token in the response), inject them into
+          the live HTTP session. Adds a finding describing success or
+          failure mode.
+        - ``bearer``: inject ``Authorization: Bearer <token>`` from
+          ``config.auth_credentials['token']``. No network request.
+        - ``basic``: inject ``Authorization: Basic <base64>`` from
+          ``config.auth_credentials['username'/'password']``. No request.
+
+        Empty or unknown ``auth_type`` is a no-op. Failures record a HIGH
+        finding and let the scan continue against the unauthenticated
+        surface — operators still want the partial result.
+        """
+        from auth_scan.core.login import (
+            LoginSpec,
+            basic_auth_header,
+            bearer_auth_header,
+            perform_login,
+        )
+
+        auth_type = (self.config.auth_type or "").lower()
+        if not auth_type:
+            return
+        if self.http is None:
+            return  # defensive: _init_http_client must run first
+
+        creds = self.config.auth_credentials or {}
+
+        if auth_type == "bearer":
+            token = creds.get("token", "")
+            if not token:
+                self.report.add_finding(
+                    Finding(
+                        title="Authenticated Scan: Bearer Token Missing",
+                        description=(
+                            "--auth-type bearer was requested but no --token was "
+                            "provided. Continuing with the unauthenticated scan."
+                        ),
+                        severity=Severity.HIGH,
+                        module_name="auth_phase",
+                        tags=["auth", "configuration"],
+                    )
+                )
+                return
+            self.http.session.headers.update(bearer_auth_header(token))
+            self.report.metadata["auth_phase"] = {
+                "type": "bearer",
+                "success": True,
+                "detection_method": "header-injected",
+            }
+            return
+
+        if auth_type == "basic":
+            user = creds.get("username", "")
+            pw = creds.get("password", "")
+            if not user or not pw:
+                self.report.add_finding(
+                    Finding(
+                        title="Authenticated Scan: Basic Credentials Missing",
+                        description=(
+                            "--auth-type basic requires both --username and --password. "
+                            "Continuing with the unauthenticated scan."
+                        ),
+                        severity=Severity.HIGH,
+                        module_name="auth_phase",
+                        tags=["auth", "configuration"],
+                    )
+                )
+                return
+            self.http.session.headers.update(basic_auth_header(user, pw))
+            self.report.metadata["auth_phase"] = {
+                "type": "basic",
+                "success": True,
+                "detection_method": "header-injected",
+            }
+            return
+
+        if auth_type == "form":
+            login_url = getattr(self.config, "login_url", "")
+            user = creds.get("username", "")
+            pw = creds.get("password", "")
+            if not login_url or not user or not pw:
+                self.report.add_finding(
+                    Finding(
+                        title="Authenticated Scan: Form Login Configuration Incomplete",
+                        description=(
+                            "--auth-type form requires --login-url, --username, "
+                            "and --password. Continuing with the unauthenticated scan."
+                        ),
+                        severity=Severity.HIGH,
+                        module_name="auth_phase",
+                        tags=["auth", "configuration"],
+                    )
+                )
+                return
+
+            spec = LoginSpec(
+                url=login_url,
+                username=user,
+                password=pw,
+                username_field=getattr(self.config, "login_username_field", "username"),
+                password_field=getattr(self.config, "login_password_field", "password"),
+                success_indicator=getattr(self.config, "login_success_indicator", ""),
+            )
+            result = perform_login(spec, self.http)
+
+            # Cookies are already on http.session (the requests Session
+            # mutated during the POST). Inject any captured Authorization
+            # header so subsequent module requests carry it.
+            if result.headers_to_inject:
+                self.http.session.headers.update(result.headers_to_inject)
+
+            self.report.metadata["auth_phase"] = {
+                "type": "form",
+                "success": result.success,
+                "detection_method": result.detection_method,
+                "response_status": result.response_status,
+                "cookies_captured": sorted(result.cookies.keys()),
+                "header_injected": bool(result.headers_to_inject),
+                "warnings": result.warnings,
+            }
+
+            if not result.success:
+                self.report.add_finding(
+                    Finding(
+                        title="Authenticated Scan: Login Failed",
+                        description=(
+                            f"Form login to {login_url} did not succeed "
+                            f"(status={result.response_status}, "
+                            f"detection={result.detection_method}). "
+                            "Continuing with the unauthenticated scan; subsequent "
+                            "modules will see only the front-door surface."
+                        ),
+                        severity=Severity.HIGH,
+                        evidence={
+                            "login_url": login_url,
+                            "response_status": result.response_status,
+                            "detection_method": result.detection_method,
+                            "warnings": result.warnings,
+                        },
+                        remediation=(
+                            "Verify --username/--password and that --login-url is the "
+                            "correct POST endpoint. If the form uses non-standard "
+                            "field names, set --login-field-username/--login-field-password. "
+                            "If the app returns a non-200/302 on success, set "
+                            "--login-success with the appropriate indicator."
+                        ),
+                        module_name="auth_phase",
+                        confidence=0.9,
+                        tags=["auth", "login-failed"],
+                    )
+                )
+            else:
+                self.report.add_finding(
+                    Finding(
+                        title="Authenticated Scan: Login Succeeded",
+                        description=(
+                            f"Form login to {login_url} succeeded "
+                            f"({result.detection_method}). "
+                            f"{len(result.cookies)} cookie(s) captured; "
+                            "attack modules will run against the authenticated surface."
+                        ),
+                        severity=Severity.INFO,
+                        evidence={
+                            "login_url": login_url,
+                            "detection_method": result.detection_method,
+                            "cookies_captured": sorted(result.cookies.keys()),
+                            "header_injected": bool(result.headers_to_inject),
+                        },
+                        module_name="auth_phase",
+                        tags=["auth", "login-succeeded"],
+                    )
+                )
+            return
+
+        # Unknown auth_type — let validate() catch it next time, but be
+        # forgiving here so a typo doesn't kill the scan silently.
+        self.report.add_finding(
+            Finding(
+                title=f"Authenticated Scan: Unknown auth_type '{auth_type}'",
+                description=(
+                    f"auth_type '{auth_type}' is not recognized. Expected one of: "
+                    "bearer, basic, form. Continuing with the unauthenticated scan."
+                ),
+                severity=Severity.LOW,
+                module_name="auth_phase",
+                tags=["auth", "configuration"],
+            )
+        )
+
     def run(self) -> ScanReport:
         """Execute the full scan lifecycle: probe → modules → report."""
         self._start_time = time.monotonic()
@@ -174,6 +369,18 @@ class ScanEngine:
             # Phase 1: Probe
             self.report.status = "probing"
             self._run_probe()
+
+            if self._shutdown_requested:
+                return self.report
+
+            # Phase 1.5: Authentication.
+            # PR-16 (P1 #5): if the operator supplied form/bearer/basic
+            # credentials, log in (or inject the header) BEFORE attack
+            # modules run so JWT/session/brute/etc. see the authenticated
+            # surface. Failures here add a HIGH finding and continue with
+            # the unauthenticated scan — many engagements still get value
+            # from front-door findings even when login fails.
+            self._apply_auth_phase()
 
             if self._shutdown_requested:
                 return self.report

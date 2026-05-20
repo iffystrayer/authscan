@@ -208,6 +208,54 @@ class TestRs256JwksReachable:
         assert token.count(".") == 2, token
 
 
+class TestAuthPhaseAgainstVulnApp:
+    """PR-16 (P1 #5) — pre-scan login phase against the live vuln_app.
+
+    vuln_app's ``/login`` accepts ``admin:admin`` and sets a Flask session
+    cookie on success. The auth phase should capture that cookie before
+    any attack modules run, and the report's ``auth_phase`` metadata
+    should reflect the success.
+    """
+
+    def test_form_login_against_vuln_app_captures_session(
+        self, scan_engine_for, vuln_app_url
+    ) -> None:
+        engine = scan_engine_for(
+            modules=["probe"],
+            auth_type="form",
+            auth_credentials={"username": "admin", "password": "admin"},
+            login_url=f"{vuln_app_url}/login",
+        )
+        report = engine.run()
+        assert report.status == "completed"
+        meta = report.metadata.get("auth_phase", {})
+        assert meta.get("type") == "form"
+        assert meta.get("success") is True, (
+            f"expected login to succeed against vuln_app; meta={meta}"
+        )
+        # vuln_app uses Flask's default session cookie name.
+        assert "session" in meta.get("cookies_captured", []), meta
+        # The success path emits an INFO finding so operators see it.
+        assert _has(report, "Login Succeeded")
+
+    def test_form_login_with_wrong_password_records_failure(
+        self, scan_engine_for, vuln_app_url
+    ) -> None:
+        engine = scan_engine_for(
+            modules=["probe"],
+            auth_type="form",
+            auth_credentials={"username": "admin", "password": "definitely-wrong"},
+            login_url=f"{vuln_app_url}/login",
+        )
+        report = engine.run()
+        meta = report.metadata.get("auth_phase", {})
+        assert meta.get("type") == "form"
+        assert meta.get("success") is False, meta
+        # Engine does NOT abort on login failure — scan continues.
+        assert report.status == "completed"
+        assert _has(report, "Login Failed")
+
+
 class TestRiskScoreNonZero:
     """Sanity: a deliberately vulnerable target should not produce a
     risk_score of 0. This is the simplest end-to-end signal that the
